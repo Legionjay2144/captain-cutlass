@@ -5,6 +5,7 @@ async def handle_ship_command(
     *,
     is_admin,
     get_ship_settings,
+    get_ship,
     set_ship_setting,
     format_ship_status,
     rename_ship,
@@ -477,6 +478,18 @@ async def handle_ship_command(
     if command.startswith(
         "!cutlass voyage start "
     ):
+        ship = await get_ship(
+            message.guild.id
+        )
+
+        if int(ship["hull"]) <= 0:
+            await message.reply(
+                "**THE SHIP IS DISABLED**\n"
+                "Repair the hull before ordering another voyage.",
+                mention_author=False
+            )
+            return True
+
         if not is_admin(message):
             await message.reply(
                 "Only the Admiralty may order the ship to sail.",

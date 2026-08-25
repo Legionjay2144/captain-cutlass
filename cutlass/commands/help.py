@@ -30,6 +30,7 @@ async def handle_help_command(
                 "**Fun, Lore & History** — `!cutlass help fun`\n"
                 f"**{parrot['name']}** — `!cutlass help parrot`\n"
                 f"**{ship['name']}** — `!cutlass help ship`\n"
+                "**Pirate World & Combat** — `!cutlass help world`\n"
                 "**Admiralty Controls** — `!cutlass help admin`\n\n"
                 "Use `!cutlass help all` for the full command list."
             ),
@@ -204,6 +205,46 @@ async def handle_help_command(
 
         return True
 
+    if command == "!cutlass help world":
+        embed = discord.Embed(
+            title="🌍 Pirate World & Combat",
+            description=(
+                "**World & Exploration**\n"
+                "`!cutlass world` — Pirate World status\n"
+                "`!cutlass world map` — View discovered regions and islands\n"
+                "`!cutlass world locations` — View discovered locations\n"
+                "`!cutlass world history` — View world history\n"
+                "`!cutlass explore` — Explore the Pirate World\n"
+                "`!cutlass island` — View the current island\n"
+                "`!cutlass island explore` — Explore the current island\n\n"
+
+                "**Naval Combat**\n"
+                "`!cutlass battle` — Current naval battle\n"
+                "`!cutlass battle attack` — Fire on the enemy\n"
+                "`!cutlass battle defend` — Brace for incoming fire\n"
+                "`!cutlass battle board` — Boarding action status\n"
+                "`!cutlass battle flee` — Attempt to escape\n\n"
+
+                "**Sea Monsters**\n"
+                "`!cutlass monster` — Current monster encounter\n"
+                "`!cutlass monster attack` — Attack the monster\n\n"
+
+                "**Boss Encounters**\n"
+                "`!cutlass boss` — Current boss encounter\n"
+                "`!cutlass boss attack` — Attack the boss\n"
+                "`!cutlass boss defend` — Defend against the boss"
+            ),
+            color=0x3498DB
+        )
+
+        await message.reply(
+            embed=embed,
+            mention_author=False
+        )
+
+        return True
+
+
     if command == "!cutlass help admin":
         embed = discord.Embed(
             title="⚙️ Admiralty Controls",
@@ -301,6 +342,24 @@ async def handle_help_command(
                 "`!cutlass parrot memories`\n"
                 "`!cutlass parrot jokes`\n"
                 "`!cutlass parrot history`"
+            ),
+            (
+                "**Pirate World & Combat**\n"
+                "`!cutlass world`\n"
+                "`!cutlass world map`\n"
+                "`!cutlass world locations`\n"
+                "`!cutlass explore`\n"
+                "`!cutlass island`\n"
+                "`!cutlass island explore`\n"
+                "`!cutlass battle`\n"
+                "`!cutlass battle attack`\n"
+                "`!cutlass battle defend`\n"
+                "`!cutlass battle flee`\n"
+                "`!cutlass monster`\n"
+                "`!cutlass monster attack`\n"
+                "`!cutlass boss`\n"
+                "`!cutlass boss attack`\n"
+                "`!cutlass boss defend`"
             ),
             (
                 "**Ship World**\n"

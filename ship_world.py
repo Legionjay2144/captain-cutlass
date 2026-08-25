@@ -460,3 +460,209 @@ async def format_upgrades(guild_id):
         lines.append(f"- **{info['label']}** {level}/{info['max_level']} - {cost}")
     lines += ["", "Use `!cutlass ship upgrade <name>`." ]
     return "\n".join(lines)
+
+
+# =========================================================
+# Living Ship Combat API
+# =========================================================
+
+async def damage_ship(guild_id, amount):
+    """
+    Apply real combat damage to the Living Ship.
+
+    Hull can never fall below zero.
+    Returns the updated ship.
+    """
+
+    await ensure_ship(guild_id)
+
+    amount = max(0, int(amount))
+
+    db = await _db()
+
+    try:
+        await db.execute(
+            """
+            UPDATE ships
+            SET hull = MAX(0, hull - ?),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (amount, guild_id)
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    return await get_ship(guild_id)
+
+
+async def reward_ship(
+    guild_id,
+    doubloons=0,
+    xp_reward=0
+):
+    """
+    Award the Living Ship treasury and XP.
+
+    Handles multiple level-ups automatically.
+    Returns reward and updated ship information.
+    """
+
+    await ensure_ship(guild_id)
+
+    doubloons = max(0, int(doubloons))
+    xp_reward = max(0, int(xp_reward))
+
+    db = await _db()
+
+    try:
+        row = await (
+            await db.execute(
+                """
+                SELECT level, xp
+                FROM ships
+                WHERE guild_id = ?
+                """,
+                (guild_id,)
+            )
+        ).fetchone()
+
+        level = int(row["level"])
+        xp = int(row["xp"]) + xp_reward
+
+        levels_gained = 0
+
+        while xp >= xp_needed(level):
+            xp -= xp_needed(level)
+            level += 1
+            levels_gained += 1
+
+        await db.execute(
+            """
+            UPDATE ships
+            SET treasury = treasury + ?,
+                xp = ?,
+                level = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (
+                doubloons,
+                xp,
+                level,
+                guild_id
+            )
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    ship = await get_ship(guild_id)
+
+    return {
+        "doubloons": doubloons,
+        "xp": xp_reward,
+        "levels_gained": levels_gained,
+        "level": level,
+        "ship": ship,
+    }
+
+
+async def combat_ship_status(guild_id):
+    """
+    Return combat-relevant Living Ship information.
+    """
+
+    ship = await get_ship(guild_id)
+    upgrades = await get_upgrade_levels(guild_id)
+    caps = ship_caps(upgrades)
+
+    return {
+        "name": ship["name"],
+        "hull": int(ship["hull"]),
+        "max_hull": int(caps["hull"]),
+        "sails": int(ship["sails"]),
+        "morale": int(ship["morale"]),
+        "treasury": int(ship["treasury"]),
+        "level": int(ship["level"]),
+        "xp": int(ship["xp"]),
+        "xp_needed": xp_needed(
+            int(ship["level"])
+        ),
+        "disabled": int(ship["hull"]) <= 0,
+    }
+
+
+async def add_ship_treasury(
+    guild_id,
+    amount
+):
+    await ensure_ship(guild_id)
+
+    amount = max(0, int(amount))
+
+    db = await _db()
+
+    try:
+        await db.execute(
+            """
+            UPDATE ships
+            SET treasury = treasury + ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (amount, guild_id)
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    return await get_ship(guild_id)
+
+
+async def add_ship_supplies(
+    guild_id,
+    amount
+):
+    await ensure_ship(guild_id)
+
+    amount = max(0, int(amount))
+
+    upgrades = await get_upgrade_levels(
+        guild_id
+    )
+
+    max_supplies = ship_caps(
+        upgrades
+    )["supplies"]
+
+    db = await _db()
+
+    try:
+        await db.execute(
+            """
+            UPDATE ships
+            SET supplies = MIN(?, supplies + ?),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (
+                max_supplies,
+                amount,
+                guild_id
+            )
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    return await get_ship(guild_id)

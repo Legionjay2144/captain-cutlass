@@ -1,0 +1,479 @@
+import os
+import random
+
+import aiosqlite
+
+
+DB_PATH = os.getenv(
+    "DATABASE_PATH",
+    "/app/data/captain.db"
+)
+
+
+ENEMY_SHIPS = [
+    {
+        "name": "The Rusted Fang",
+        "captain": "Captain Ironjaw",
+        "hull": 80,
+        "attack_min": 8,
+        "attack_max": 18,
+        "reward_min": 100,
+        "reward_max": 220,
+        "xp": 100,
+        "danger": "Low",
+    },
+    {
+        "name": "The Crimson Widow",
+        "captain": "Red Mara",
+        "hull": 130,
+        "attack_min": 12,
+        "attack_max": 25,
+        "reward_min": 220,
+        "reward_max": 450,
+        "xp": 225,
+        "danger": "Medium",
+    },
+    {
+        "name": "The Drowned Crown",
+        "captain": "Admiral Graves",
+        "hull": 200,
+        "attack_min": 18,
+        "attack_max": 35,
+        "reward_min": 500,
+        "reward_max": 900,
+        "xp": 450,
+        "danger": "High",
+    },
+]
+
+
+async def _db():
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    return db
+
+
+async def initialize_naval():
+
+    db = await _db()
+
+    try:
+        await db.executescript("""
+        CREATE TABLE IF NOT EXISTS naval_battles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            enemy_name TEXT NOT NULL,
+            enemy_captain TEXT DEFAULT '',
+            enemy_hull INTEGER NOT NULL,
+            enemy_max_hull INTEGER NOT NULL,
+            enemy_attack_min INTEGER DEFAULT 5,
+            enemy_attack_max INTEGER DEFAULT 15,
+            reward_min INTEGER DEFAULT 50,
+            reward_max INTEGER DEFAULT 150,
+            xp_reward INTEGER DEFAULT 50,
+            danger TEXT DEFAULT 'Low',
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_naval_active
+        ON naval_battles(guild_id, status, id DESC);
+
+        CREATE TABLE IF NOT EXISTS naval_battle_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            battle_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            action TEXT DEFAULT '',
+            description TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_naval_events
+        ON naval_battle_events(battle_id, id);
+        """)
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+
+async def get_active_battle(guild_id):
+
+    db = await _db()
+
+    try:
+        cursor = await db.execute("""
+            SELECT *
+            FROM naval_battles
+            WHERE guild_id = ?
+              AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+        """, (guild_id,))
+
+        return await cursor.fetchone()
+
+    finally:
+        await db.close()
+
+
+async def add_battle_event(
+    battle_id,
+    guild_id,
+    action,
+    description
+):
+
+    db = await _db()
+
+    try:
+        await db.execute("""
+            INSERT INTO naval_battle_events (
+                battle_id,
+                guild_id,
+                action,
+                description
+            )
+            VALUES (?, ?, ?, ?)
+        """, (
+            battle_id,
+            guild_id,
+            action,
+            description,
+        ))
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+
+async def start_naval_battle(guild_id):
+
+    active = await get_active_battle(
+        guild_id
+    )
+
+    if active:
+        return False, active
+
+    enemy = random.choice(
+        ENEMY_SHIPS
+    )
+
+    db = await _db()
+
+    try:
+        cursor = await db.execute("""
+            INSERT INTO naval_battles (
+                guild_id,
+                enemy_name,
+                enemy_captain,
+                enemy_hull,
+                enemy_max_hull,
+                enemy_attack_min,
+                enemy_attack_max,
+                reward_min,
+                reward_max,
+                xp_reward,
+                danger
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            guild_id,
+            enemy["name"],
+            enemy["captain"],
+            enemy["hull"],
+            enemy["hull"],
+            enemy["attack_min"],
+            enemy["attack_max"],
+            enemy["reward_min"],
+            enemy["reward_max"],
+            enemy["xp"],
+            enemy["danger"],
+        ))
+
+        battle_id = cursor.lastrowid
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    await add_battle_event(
+        battle_id,
+        guild_id,
+        "start",
+        (
+            enemy["name"]
+            + " commanded by "
+            + enemy["captain"]
+            + " engaged the crew."
+        )
+    )
+
+    return True, await get_active_battle(
+        guild_id
+    )
+
+
+async def format_battle(guild_id):
+
+    battle = await get_active_battle(
+        guild_id
+    )
+
+    if not battle:
+        return (
+            "**NAVAL BATTLE**\n"
+            "The horizon is clear. No enemy ship is currently engaged."
+        )
+
+    return (
+        "**NAVAL BATTLE**\n"
+        "Enemy: **"
+        + battle["enemy_name"]
+        + "**\n"
+        "Captain: **"
+        + battle["enemy_captain"]
+        + "**\n"
+        "Danger: **"
+        + battle["danger"]
+        + "**\n"
+        "Enemy Hull: **"
+        + str(battle["enemy_hull"])
+        + "/"
+        + str(battle["enemy_max_hull"])
+        + "**\n\n"
+        "Commands:\n"
+        "`!cutlass battle attack`\n"
+        "`!cutlass battle defend`\n"
+        "`!cutlass battle board`\n"
+        "`!cutlass battle flee`"
+    )
+
+
+async def attack_enemy(
+    guild_id,
+    ship
+):
+
+    battle = await get_active_battle(
+        guild_id
+    )
+
+    if not battle:
+        return False, "There is no enemy ship to attack.", None
+
+    player_damage = random.randint(
+        12,
+        28
+    )
+
+    enemy_hull = max(
+        0,
+        battle["enemy_hull"]
+        - player_damage
+    )
+
+    enemy_damage = 0
+
+    if enemy_hull > 0:
+        enemy_damage = random.randint(
+            battle["enemy_attack_min"],
+            battle["enemy_attack_max"]
+        )
+
+    db = await _db()
+
+    try:
+        await db.execute("""
+            UPDATE naval_battles
+            SET enemy_hull = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            enemy_hull,
+            battle["id"],
+        ))
+
+        if enemy_hull <= 0:
+            await db.execute("""
+                UPDATE naval_battles
+                SET status = 'victory',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (
+                battle["id"],
+            ))
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    if enemy_hull <= 0:
+
+        reward = random.randint(
+            battle["reward_min"],
+            battle["reward_max"]
+        )
+
+        await add_battle_event(
+            battle["id"],
+            guild_id,
+            "victory",
+            (
+                battle["enemy_name"]
+                + " was defeated."
+            )
+        )
+
+        return True, (
+            "**ENEMY SHIP DEFEATED**\n"
+            + battle["enemy_name"]
+            + " takes **"
+            + str(player_damage)
+            + "** damage and slips beneath the waves.\n\n"
+            "Recovered: **"
+            + str(reward)
+            + " doubloons**\n"
+            "Ship XP: **"
+            + str(battle["xp_reward"])
+            + "**"
+        ), {
+            "victory": True,
+            "reward": reward,
+            "xp": battle["xp_reward"],
+            "enemy_damage": 0,
+        }
+
+    await add_battle_event(
+        battle["id"],
+        guild_id,
+        "attack",
+        (
+            "Crew dealt "
+            + str(player_damage)
+            + " damage; enemy returned "
+            + str(enemy_damage)
+            + "."
+        )
+    )
+
+    return True, (
+        "**CANNONS FIRE!**\n"
+        "Your broadside deals **"
+        + str(player_damage)
+        + "** damage.\n"
+        + battle["enemy_name"]
+        + " returns fire for **"
+        + str(enemy_damage)
+        + "** damage.\n\n"
+        "Enemy Hull: **"
+        + str(enemy_hull)
+        + "/"
+        + str(battle["enemy_max_hull"])
+        + "**"
+    ), {
+        "victory": False,
+        "reward": 0,
+        "xp": 0,
+        "enemy_damage": enemy_damage,
+    }
+
+
+async def defend(
+    guild_id
+):
+
+    battle = await get_active_battle(
+        guild_id
+    )
+
+    if not battle:
+        return False, "There is no enemy to defend against.", None
+
+    raw_damage = random.randint(
+        battle["enemy_attack_min"],
+        battle["enemy_attack_max"]
+    )
+
+    damage = max(
+        1,
+        raw_damage // 2
+    )
+
+    await add_battle_event(
+        battle["id"],
+        guild_id,
+        "defend",
+        (
+            "Crew braced for impact and reduced incoming damage to "
+            + str(damage)
+            + "."
+        )
+    )
+
+    return True, (
+        "**BRACE FOR IMPACT!**\n"
+        "The crew tightens the lines and turns the hull into the attack.\n"
+        "Incoming damage reduced to **"
+        + str(damage)
+        + "**."
+    ), {
+        "enemy_damage": damage,
+    }
+
+
+async def flee_battle(guild_id):
+
+    battle = await get_active_battle(
+        guild_id
+    )
+
+    if not battle:
+        return False, "There is no battle to flee from."
+
+    success = random.randint(
+        1,
+        100
+    ) <= 60
+
+    if not success:
+        return False, (
+            "The enemy cuts off the escape route. "
+            "The battle continues."
+        )
+
+    db = await _db()
+
+    try:
+        await db.execute("""
+            UPDATE naval_battles
+            SET status = 'fled',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            battle["id"],
+        ))
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    await add_battle_event(
+        battle["id"],
+        guild_id,
+        "flee",
+        "The crew successfully escaped the battle."
+    )
+
+    return True, (
+        "Full sails! The crew escapes "
+        + battle["enemy_name"]
+        + " and disappears over the horizon."
+    )

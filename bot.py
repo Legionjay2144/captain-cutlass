@@ -11,6 +11,48 @@ import discord
 from cutlass.commands.help import handle_help_command
 from cutlass.commands.parrot import handle_parrot_command
 from cutlass.commands.ship import handle_ship_command
+from cutlass.commands.world import handle_world_command
+from cutlass.commands.exploration import handle_exploration_command
+from cutlass.commands.islands import handle_island_command
+from cutlass.world.islands import (
+    format_island,
+    choose_island_activity,
+)
+from cutlass.commands.battle import handle_battle_command
+from cutlass.commands.monsters import handle_monster_command
+from cutlass.commands.bosses import handle_boss_command
+from cutlass.world.bosses import (
+    initialize_bosses,
+    get_active_boss,
+    start_boss,
+    format_boss,
+    attack_boss,
+    defend_boss,
+)
+from cutlass.world.monsters import (
+    initialize_monsters,
+    start_monster_encounter,
+    format_monster,
+    attack_monster,
+    get_active_monster,
+)
+from cutlass.world.naval import (
+    initialize_naval,
+    start_naval_battle,
+    format_battle,
+    attack_enemy,
+    defend,
+    flee_battle,
+    get_active_battle,
+)
+from cutlass.world.pirate_world import (
+    initialize_pirate_world,
+    format_world,
+    format_world_map,
+    format_discoveries,
+    get_world_history,
+    explore_random_island,
+)
 
 from discord.ext import tasks
 from dotenv import load_dotenv
@@ -40,7 +82,10 @@ from ship_world import (
     format_ship_status, rename_ship, get_history, donate, top_contributors,
     repair_ship, format_upgrades, buy_upgrade, format_destinations,
     start_voyage, get_active_voyage, resolve_due_voyages,
-    discord_timestamp
+    discord_timestamp,
+    damage_ship, reward_ship, combat_ship_status,
+    add_ship_treasury, add_ship_supplies,
+    add_history as add_ship_history
 )
 
 
@@ -1789,13 +1834,15 @@ async def analyze_message(
     punbattle_mode=False
 ):
 
+    # The Living Ship may be referenced by both direct-question
+    # and normal conversational prompts, so always load it.
+    current_ship = await get_ship(
+        message.guild.id
+    )
+
     if direct_question_mode:
 
         canon_rows = await get_all_captain_canon()
-
-        current_ship = await get_ship(
-            message.guild.id
-        )
 
         authoritative_reply = await resolve_authoritative_question(
             message,
@@ -3393,6 +3440,12 @@ async def handle_commands(
 
     command = content.lower()
 
+    # Only Captain Cutlass commands belong in this router.
+    # Normal conversation and direct mentions must continue
+    # through the conversational AI path.
+    if not command.startswith("!cutlass"):
+        return False
+
 
     if await handle_help_command(
         message,
@@ -3852,6 +3905,7 @@ async def handle_commands(
         command,
         is_admin=is_admin,
         get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
         set_ship_setting=set_ship_setting,
         format_ship_status=format_ship_status,
         rename_ship=rename_ship,
@@ -3867,6 +3921,113 @@ async def handle_commands(
         get_active_voyage=get_active_voyage,
         start_voyage=start_voyage,
         discord_timestamp=discord_timestamp,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    if await handle_world_command(
+        message,
+        command,
+        format_world=format_world,
+        format_world_map=format_world_map,
+        format_discoveries=format_discoveries,
+        get_world_history=get_world_history
+    ):
+        return True
+
+
+    if await handle_exploration_command(
+        message,
+        command,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        get_active_battle=get_active_battle,
+        get_active_monster=get_active_monster,
+        explore_random_island=explore_random_island,
+        start_naval_battle=start_naval_battle,
+        start_monster_encounter=start_monster_encounter,
+        add_ship_treasury=add_ship_treasury,
+        add_ship_supplies=add_ship_supplies,
+        add_ship_history=add_ship_history,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    if await handle_island_command(
+        message,
+        command,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        get_active_battle=get_active_battle,
+        get_active_monster=get_active_monster,
+        format_island=format_island,
+        choose_island_activity=choose_island_activity,
+        add_ship_treasury=add_ship_treasury,
+        add_ship_supplies=add_ship_supplies,
+        add_ship_history=add_ship_history,
+        start_monster_encounter=start_monster_encounter,
+        start_boss=start_boss,
+        get_active_boss=get_active_boss,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    if await handle_battle_command(
+        message,
+        command,
+        is_admin=is_admin,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        start_naval_battle=start_naval_battle,
+        get_active_monster=get_active_monster,
+        format_battle=format_battle,
+        attack_enemy=attack_enemy,
+        defend=defend,
+        flee_battle=flee_battle,
+        damage_ship=damage_ship,
+        reward_ship=reward_ship,
+        combat_ship_status=combat_ship_status,
+        add_ship_history=add_ship_history,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    if await handle_monster_command(
+        message,
+        command,
+        is_admin=is_admin,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        start_monster_encounter=start_monster_encounter,
+        get_active_battle=get_active_battle,
+        format_monster=format_monster,
+        attack_monster=attack_monster,
+        damage_ship=damage_ship,
+        reward_ship=reward_ship,
+        add_ship_history=add_ship_history,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    if await handle_boss_command(
+        message,
+        command,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        get_active_battle=get_active_battle,
+        get_active_monster=get_active_monster,
+        get_active_boss=get_active_boss,
+        format_boss=format_boss,
+        attack_boss=attack_boss,
+        defend_boss=defend_boss,
+        damage_ship=damage_ship,
+        reward_ship=reward_ship,
+        add_ship_history=add_ship_history,
         post_captains_log=post_captains_log
     ):
         return True
@@ -4964,18 +5125,24 @@ async def before_maintenance():
 
 
 _initialized = False
+_initializing = False
 
 
 @bot.event
 async def on_ready():
 
-    global _initialized
+    global _initialized, _initializing
 
 
-    if not _initialized:
+    if not _initialized and not _initializing:
+        _initializing = True
 
         await initialize_database()
         await initialize_ship_world()
+        await initialize_pirate_world()
+        await initialize_naval()
+        await initialize_monsters()
+        await initialize_bosses()
         await initialize_parrot()
 
 
@@ -5021,6 +5188,7 @@ async def on_ready():
 
 
         _initialized = True
+        _initializing = False
 
 
     print(
