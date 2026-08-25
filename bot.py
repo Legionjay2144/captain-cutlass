@@ -3839,7 +3839,6 @@ async def handle_commands(
         set_parrot_mood=set_parrot_mood,
         randomize_parrot_mood=randomize_parrot_mood,
         PARROT_MOODS=PARROT_MOODS,
-        generate_parrot_reply=generate_parrot_reply,
         increment_parrot_interactions=increment_parrot_interactions,
         increase_parrot_familiarity=increase_parrot_familiarity
     ):

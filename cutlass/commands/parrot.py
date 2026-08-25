@@ -21,7 +21,6 @@ async def handle_parrot_command(
     set_parrot_mood,
     randomize_parrot_mood,
     PARROT_MOODS,
-    generate_parrot_reply,
     increment_parrot_interactions,
     increase_parrot_familiarity
 ):
