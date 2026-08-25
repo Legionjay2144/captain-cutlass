@@ -1,0 +1,12 @@
+services:
+  captain-cutlass:
+    build: .
+    container_name: captain-cutlass
+    restart: unless-stopped
+    
+    env_file:
+      - .env
+    
+    volumes:
+      - /data/captain-cutlass/data:/app/data
+      
