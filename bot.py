@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 from cutlass.commands.help import handle_help_command
 from cutlass.commands.parrot import handle_parrot_command
+from cutlass.commands.ship import handle_ship_command
 
 from discord.ext import tasks
 from dotenv import load_dotenv
@@ -3845,153 +3846,29 @@ async def handle_commands(
         return True
 
 
-    # Ship World and voyages. Configuration commands may be used anywhere;
-    # gameplay is routed to the configured Ship World channel.
-    if command.startswith("!cutlass ship") or command.startswith("!cutlass voyage"):
-        settings = await get_ship_settings(message.guild.id)
-        ship_channel = message.guild.get_channel(settings.get("channel_id", 0))
-
-        if command.startswith("!cutlass ship channel"):
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may set the Ship World channel.", mention_author=False)
-                return True
-            channel = message.channel_mentions[0] if message.channel_mentions else None
-            if channel is None:
-                await message.reply("Use: `!cutlass ship channel #ship-world`", mention_author=False)
-                return True
-            await set_ship_setting(message.guild.id, "channel_id", channel.id)
-            await message.reply("Ship World set to " + channel.mention + ".", mention_author=False)
-            return True
-
-        if command in ("!cutlass ship on", "!cutlass ship off"):
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may configure Ship World.", mention_author=False)
-                return True
-            enabled = command.endswith(" on")
-            if enabled and not settings.get("channel_id"):
-                await message.reply("Set the channel first with `!cutlass ship channel #ship-world`.", mention_author=False)
-                return True
-            await set_ship_setting(message.guild.id, "enabled", 1 if enabled else 0)
-            await message.reply("Ship World is now " + ("enabled." if enabled else "disabled."), mention_author=False)
-            return True
-
-        if command == "!cutlass ship status":
-            state = "Enabled" if settings.get("enabled") else "Disabled"
-            await message.reply("**SHIP WORLD**\nStatus: " + state + "\nChannel: " + (ship_channel.mention if ship_channel else "Not configured"), mention_author=False)
-            return True
-
-        if not settings.get("enabled"):
-            await message.reply("Ship World is disabled on this server.", mention_author=False)
-            return True
-        if ship_channel is None:
-            await message.reply("The Ship World channel is not configured.", mention_author=False)
-            return True
-        if message.channel.id != ship_channel.id:
-            await message.reply("All ship business belongs in " + ship_channel.mention + ".", mention_author=False)
-            return True
-
-        if command in ("!cutlass ship", "!cutlass ship world"):
-            await message.reply(await format_ship_status(message.guild.id), mention_author=False)
-            return True
-
-        if command.startswith("!cutlass ship name "):
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may rename the ship.", mention_author=False)
-                return True
-            try:
-                name = await rename_ship(message.guild.id, content[len("!cutlass ship name "):])
-            except ValueError as error:
-                await message.reply(str(error), mention_author=False)
-                return True
-            await message.reply("Strike the old name from the ledger. She is now **" + name + "**.", mention_author=False)
-            await post_captains_log(message.guild, "**SHIP WORLD**\nThe server ship was renamed **" + name + "**.", "ship")
-            return True
-
-        if command == "!cutlass ship history":
-            rows = await get_history(message.guild.id, 12)
-            if not rows:
-                await message.reply("The ship's history is still a blank page.", mention_author=False)
-            else:
-                await message.reply(("**SHIP HISTORY**\n" + "\n".join("- " + row[0] for row in rows))[:1900], mention_author=False)
-            return True
-
-        if command == "!cutlass ship treasury":
-            ship_text = await format_ship_status(message.guild.id)
-            contributors = await top_contributors(message.guild.id)
-            treasury_line = next((line for line in ship_text.splitlines() if line.startswith("Treasury:")), "Treasury: **0 doubloons**")
-            text = "**SHIP TREASURY**\n" + treasury_line.replace("Treasury: ", "")
-            if contributors:
-                text += "\n\n**Top Contributors**\n" + "\n".join(str(i) + ". " + str(name or "Unknown") + " - " + str(amount) for i, (name, amount) in enumerate(contributors, 1))
-            await message.reply(text, mention_author=False)
-            return True
-
-        if command.startswith("!cutlass ship donate "):
-            try:
-                amount = int(content.split()[-1])
-            except ValueError:
-                await message.reply("Use: `!cutlass ship donate 100`", mention_author=False)
-                return True
-            ok, text = await donate(message.guild.id, message.author.id, message.author.display_name, amount, get_doubloons, add_doubloons)
-            await message.reply(text, mention_author=False)
-            if ok:
-                await post_captains_log(message.guild, "**SHIP TREASURY**\n" + text, "ship")
-            return True
-
-        if command == "!cutlass ship repair":
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may authorize treasury repairs.", mention_author=False)
-                return True
-            ok, text = await repair_ship(message.guild.id)
-            await message.reply(text, mention_author=False)
-            if ok:
-                await post_captains_log(message.guild, "**SHIP REPAIRS**\n" + text, "ship")
-            return True
-
-        if command == "!cutlass ship upgrades":
-            await message.reply(await format_upgrades(message.guild.id), mention_author=False)
-            return True
-
-        if command.startswith("!cutlass ship upgrade "):
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may purchase ship upgrades.", mention_author=False)
-                return True
-            ok, text = await buy_upgrade(message.guild.id, content[len("!cutlass ship upgrade "):])
-            await message.reply(text, mention_author=False)
-            if ok:
-                await post_captains_log(message.guild, "**SHIP UPGRADE**\n" + text, "ship")
-            return True
-
-        if command in ("!cutlass voyage", "!cutlass voyage destinations"):
-            await message.reply(format_destinations(), mention_author=False)
-            return True
-
-        if command == "!cutlass voyage status":
-            voyage = await get_active_voyage(message.guild.id)
-            if not voyage:
-                await message.reply("The ship is currently anchored. No voyage is active.", mention_author=False)
-            else:
-                await message.reply("**CURRENT VOYAGE**\nDestination: **" + voyage["destination"] + "**\nRisk: **" + voyage["risk"] + "**\nExpected completion: **" + discord_timestamp(voyage["completes_at"]) + "**", mention_author=False)
-            return True
-
-        if command.startswith("!cutlass voyage start "):
-            if not is_admin(message):
-                await message.reply("Only the Admiralty may order the ship to sail.", mention_author=False)
-                return True
-            try:
-                destination = int(content.split()[-1])
-            except ValueError:
-                await message.reply("Use: `!cutlass voyage start 1`", mention_author=False)
-                return True
-            ok, result = await start_voyage(message.guild.id, destination)
-            if not ok:
-                await message.reply(result, mention_author=False)
-                return True
-            text = ("**VOYAGE BEGUN**\nDestination: **" + result["name"] + "**\nRisk: **" + result["risk"] + "**\nSupplies used: **" + str(result["supplies"]) + "**\nExpected completion: **" + discord_timestamp(result["completes_at"]) + "**")
-            await message.reply(text, mention_author=False)
-            await post_captains_log(message.guild, text, "voyage")
-            return True
-
-        await message.reply("Unknown Ship World command. Use `!cutlass help`.", mention_author=False)
+    if await handle_ship_command(
+        message,
+        content,
+        command,
+        is_admin=is_admin,
+        get_ship_settings=get_ship_settings,
+        set_ship_setting=set_ship_setting,
+        format_ship_status=format_ship_status,
+        rename_ship=rename_ship,
+        get_history=get_history,
+        top_contributors=top_contributors,
+        donate=donate,
+        get_doubloons=get_doubloons,
+        add_doubloons=add_doubloons,
+        repair_ship=repair_ship,
+        format_upgrades=format_upgrades,
+        buy_upgrade=buy_upgrade,
+        format_destinations=format_destinations,
+        get_active_voyage=get_active_voyage,
+        start_voyage=start_voyage,
+        discord_timestamp=discord_timestamp,
+        post_captains_log=post_captains_log
+    ):
         return True
 
 
