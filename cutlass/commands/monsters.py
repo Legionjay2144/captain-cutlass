@@ -59,12 +59,6 @@ async def handle_monster_command(
         "!cutlass monster start"
     ):
 
-        if not is_admin(message):
-            await message.reply(
-                "Only the Admiralty may deliberately hunt sea monsters.",
-                mention_author=False
-            )
-            return True
 
         parts = command.split()
 

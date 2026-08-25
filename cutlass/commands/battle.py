@@ -75,12 +75,6 @@ async def handle_battle_command(
             )
             return True
 
-        if not is_admin(message):
-            await message.reply(
-                "Only the Admiralty may deliberately seek battle.",
-                mention_author=False
-            )
-            return True
 
         monster = await get_active_monster(
             message.guild.id

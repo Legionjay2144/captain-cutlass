@@ -362,12 +362,6 @@ async def handle_ship_command(
     # ---------------------------------------------------------
 
     if command == "!cutlass ship repair":
-        if not is_admin(message):
-            await message.reply(
-                "Only the Admiralty may authorize treasury repairs.",
-                mention_author=False
-            )
-            return True
 
         ok, text = await repair_ship(
             message.guild.id
@@ -404,12 +398,6 @@ async def handle_ship_command(
     if command.startswith(
         "!cutlass ship upgrade "
     ):
-        if not is_admin(message):
-            await message.reply(
-                "Only the Admiralty may purchase ship upgrades.",
-                mention_author=False
-            )
-            return True
 
         ok, text = await buy_upgrade(
             message.guild.id,
@@ -490,12 +478,6 @@ async def handle_ship_command(
             )
             return True
 
-        if not is_admin(message):
-            await message.reply(
-                "Only the Admiralty may order the ship to sail.",
-                mention_author=False
-            )
-            return True
 
         try:
             destination = int(
