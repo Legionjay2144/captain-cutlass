@@ -9,6 +9,13 @@ from zoneinfo import ZoneInfo
 
 import discord
 from cutlass.commands.help import handle_help_command
+from cutlass.commands.crew import handle_crew_command
+from cutlass.commands.lore import handle_lore_command
+from cutlass.commands.chronicle import handle_chronicle_command
+from cutlass.commands.welcome import handle_welcome_command
+from cutlass.commands.treasure import handle_treasure_command, check_treasure_answer
+from cutlass.commands.captain import handle_captain_command
+from cutlass.commands.admin import handle_admin_command
 from cutlass.commands.parrot import handle_parrot_command
 from cutlass.commands.ship import handle_ship_command
 from cutlass.commands.world import handle_world_command
@@ -3456,419 +3463,125 @@ async def handle_commands(
         return True
 
 
-    if command == "!cutlass welcome status":
-
-        settings = await cached_settings(
-            message.guild.id
-        )
-
-        channel_id = settings[
-            "welcome_channel_id"
-        ]
-
-        channel = (
-            message.guild.get_channel(
-                channel_id
-            )
-            if channel_id
-            else None
-        )
-
-        channel_text = (
-            channel.mention
-            if channel
-            else "Not configured"
-        )
-
-        enabled_text = (
-            "Enabled"
-            if settings[
-                "welcome_enabled"
-            ]
-            else "Disabled"
-        )
-
-        await message.reply(
-            (
-                "**Welcome System**\n"
-                "Status: "
-                + enabled_text
-                + "\nChannel: "
-                + channel_text
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass welcome on":
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may configure welcomes.",
-                mention_author=False
-            )
-
-            return True
-
-
-        settings = await cached_settings(
-            message.guild.id
-        )
-
-
-        if not settings[
-            "welcome_channel_id"
-        ]:
-
-            await message.reply(
-                (
-                    "Set a welcome channel first with "
-                    "`!cutlass welcome channel #channel`."
-                ),
-                mention_author=False
-            )
-
-            return True
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "welcome_enabled",
-            1
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            "Welcome messages are now enabled for this ship.",
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass welcome off":
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may configure welcomes.",
-                mention_author=False
-            )
-
-            return True
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "welcome_enabled",
-            0
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            "Welcome messages are now disabled for this ship.",
-            mention_author=False
-        )
-
-        return True
-
-
-    if command.startswith(
-        "!cutlass welcome channel"
+    if await handle_crew_command(
+        message,
+        content,
+        command,
+        get_member_meta=get_member_meta,
+        get_relationship=get_relationship,
+        get_user_memories_context=get_user_memories_context,
+        get_running_jokes=get_running_jokes,
+        get_relationship_events=get_relationship_events,
+        get_doubloons=get_doubloons,
+        get_achievements=get_achievements,
+        format_birthday=format_birthday,
+        parse_birthday=parse_birthday,
+        set_birthday=set_birthday,
+        clear_birthday=clear_birthday,
+        get_birthdays=get_birthdays,
+        get_user_memories=get_user_memories,
+        get_stats=get_stats,
+        get_top_crew=get_top_crew,
+        get_doubloon_leaderboard=get_doubloon_leaderboard,
+        delete_user_memories=delete_user_memories
     ):
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may configure welcomes.",
-                mention_author=False
-            )
-
-            return True
-
-
-        channel = None
-
-
-        if message.channel_mentions:
-
-            channel = message.channel_mentions[
-                0
-            ]
-
-
-        else:
-
-            parts = content.split()
-
-            if len(parts) >= 4:
-
-                raw = parts[
-                    3
-                ]
-
-                raw = (
-                    raw
-                    .replace("<#", "")
-                    .replace(">", "")
-                )
-
-                try:
-
-                    channel_id = int(
-                        raw
-                    )
-
-                    channel = (
-                        message.guild.get_channel(
-                            channel_id
-                        )
-                    )
-
-                except ValueError:
-
-                    channel = None
-
-
-        if channel is None:
-
-            await message.reply(
-                (
-                    "Use: `!cutlass welcome channel #welcome`"
-                ),
-                mention_author=False
-            )
-
-            return True
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "welcome_channel_id",
-            channel.id
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                "Welcome channel set to "
-                + channel.mention
-                + "."
-            ),
-            mention_author=False
-        )
-
         return True
 
 
-    if command == "!cutlass testwelcome":
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may summon imaginary new crewmates.",
-                mention_author=False
-            )
-
-            return True
-
-
-        settings = await cached_settings(
-            message.guild.id
-        )
-
-
-        mood = settings.get(
-            "mood",
-            "cheerful"
-        )
-
-
-        greeting = get_welcome_message(
-            message.author.mention,
-            mood
-        )
-
-
-        await message.reply(
-            greeting,
-            mention_author=False
-        )
-
-
+    if await handle_lore_command(
+        message,
+        command,
+        get_captain_lore=get_captain_lore,
+        format_captain_canon=format_captain_canon,
+        get_server_lore=get_server_lore,
+        random_wisdom=random_wisdom,
+        get_random_quote=get_random_quote,
+        handle_quote_save=handle_quote_save,
+        get_journal=get_journal,
+        get_timeline=get_timeline
+    ):
         return True
 
 
-    if command == "!cutlass profile":
-        meta, relationship, memories, jokes, events, balance, achievements = await asyncio.gather(
-            get_member_meta(message.guild.id, message.author.id),
-            get_relationship(message.guild.id, message.author.id),
-            get_user_memories_context(message.guild.id, message.author.id, 5, 1),
-            get_running_jokes(message.guild.id, message.author.id, 3),
-            get_relationship_events(message.guild.id, message.author.id, 3),
-            get_doubloons(message.guild.id, message.author.id),
-            get_achievements(message.guild.id, message.author.id, 5)
-        )
-        lines = ["**CREW PROFILE - " + message.author.display_name + "**"]
-        if relationship:
-            lines += ["Relationship: **" + relationship["relationship_type"] + "**", "Familiarity: **" + str(relationship["familiarity"]) + "/100**"]
-            if relationship.get("nickname"):
-                lines.append("Captain's nickname: **" + relationship["nickname"] + "**")
-            if relationship.get("opinion"):
-                lines.append("Captain's opinion: " + relationship["opinion"][:250])
-        lines.append("Doubloons: **" + str(balance) + "**")
-        if meta and meta.get("birthday_month") and meta.get("birthday_day"):
-            lines.append("Birthday: **" + format_birthday(meta["birthday_month"], meta["birthday_day"]) + "**")
-        if meta:
-            lines.append("First seen: " + str(meta.get("first_seen") or "Unknown"))
-            lines.append("Last seen: " + str(meta.get("last_seen") or "Unknown"))
-        if achievements:
-            lines.append("Achievements: " + ", ".join(a[0] for a in achievements))
-        if memories:
-            lines.append("Memories: " + str(len(memories)) + " loaded")
-        if jokes:
-            lines.append("Running jokes: " + str(len(jokes)))
-        if events:
-            lines.append("Recent shared events: " + str(len(events)))
-        await message.reply("\n".join(lines)[:1900], mention_author=False)
+    if await handle_chronicle_command(
+        message,
+        command,
+        is_admin=is_admin,
+        cached_settings=cached_settings,
+        set_guild_setting=set_guild_setting,
+        invalidate_settings_cache=invalidate_settings_cache,
+        get_latest_chronicle=get_latest_chronicle,
+        generate_chronicle=generate_chronicle
+    ):
         return True
 
-    if command == "!cutlass birthday":
-        meta = await get_member_meta(message.guild.id, message.author.id)
-        if meta and meta.get("birthday_month") and meta.get("birthday_day"):
-            text = "I have yer birthday marked as **" + format_birthday(meta["birthday_month"], meta["birthday_day"]) + "**."
-        else:
-            text = "I don't have yer birthday yet. Use `!cutlass birthday set August 23`."
-        await message.reply(text, mention_author=False)
+
+    if await handle_welcome_command(
+        message,
+        command,
+        content,
+        is_admin=is_admin,
+        cached_settings=cached_settings,
+        set_guild_setting=set_guild_setting,
+        invalidate_settings_cache=invalidate_settings_cache,
+        get_welcome_message=get_welcome_message
+    ):
         return True
 
-    if command.startswith("!cutlass birthday set "):
-        raw = content[len("!cutlass birthday set "):].strip()
-        try:
-            month, day = parse_birthday(raw)
-        except ValueError as error:
-            await message.reply(str(error), mention_author=False)
-            return True
-        await set_birthday(message.guild.id, message.author.id, message.author.display_name, month, day)
-        await message.reply("Aye! Birthday marked as **" + format_birthday(month, day) + "**. No year needed aboard this ship.", mention_author=False)
+
+    if await handle_treasure_command(
+        message,
+        command,
+        content,
+        is_admin=is_admin,
+        start_treasure_hunt=start_treasure_hunt,
+        get_treasure_hunt=get_treasure_hunt
+    ):
         return True
 
-    if command == "!cutlass birthday clear":
-        await clear_birthday(message.guild.id, message.author.id)
-        await message.reply("Birthday cleared from me ledger.", mention_author=False)
+
+    if await handle_captain_command(
+        message,
+        command,
+        is_creator=is_creator,
+        cached_settings=cached_settings
+    ):
         return True
 
-    if command == "!cutlass birthdays":
-        rows = await get_birthdays(message.guild.id)
-        if not rows:
-            await message.reply("No birthdays be written in the crew ledger yet.", mention_author=False)
-            return True
-        lines = ["**CREW BIRTHDAYS**"]
-        for user_id, username, month, day in rows[:30]:
-            lines.append("- " + str(username or user_id) + " - " + format_birthday(month, day))
-        await message.reply("\n".join(lines)[:1900], mention_author=False)
+
+    if await handle_admin_command(
+        message,
+        command,
+        content,
+        is_admin=is_admin,
+        set_guild_setting=set_guild_setting,
+        invalidate_settings_cache=invalidate_settings_cache
+    ):
         return True
 
-    if command == "!cutlass returners status":
-        settings = await cached_settings(message.guild.id)
-        await message.reply("**Returning Crewmates**\nStatus: " + ("Enabled" if settings.get("returning_enabled") else "Disabled") + "\nAbsence threshold: " + str(settings.get("returning_days", 14)) + " days", mention_author=False)
-        return True
 
-    if command in ("!cutlass returners on", "!cutlass returners off"):
-        if not is_admin(message):
-            await message.reply("Only the Admiralty may configure returning crewmates.", mention_author=False)
-            return True
-        enabled = command.endswith(" on")
-        await set_guild_setting(message.guild.id, "returning_enabled", 1 if enabled else 0)
-        invalidate_settings_cache(message.guild.id)
-        await message.reply("Returning crewmate greetings are now " + ("enabled." if enabled else "disabled."), mention_author=False)
-        return True
 
-    if command.startswith("!cutlass returners days "):
-        if not is_admin(message):
-            return True
-        try:
-            days = int(content.split()[-1])
-            if days < 1 or days > 365:
-                raise ValueError
-        except ValueError:
-            await message.reply("Choose between 1 and 365 days.", mention_author=False)
-            return True
-        await set_guild_setting(message.guild.id, "returning_days", days)
-        invalidate_settings_cache(message.guild.id)
-        await message.reply("I'll call a crewmate returning after **" + str(days) + " days** away.", mention_author=False)
-        return True
 
-    if command == "!cutlass log status":
-        settings = await cached_settings(message.guild.id)
-        channel = message.guild.get_channel(settings.get("chronicle_channel_id", 0))
-        await message.reply("**Captain's Log**\nStatus: " + ("Enabled" if settings.get("chronicle_enabled") else "Disabled") + "\nChannel: " + (channel.mention if channel else "Not configured") + "\nWeekly chronicles: " + ("Enabled" if settings.get("chronicle_enabled") else "Disabled"), mention_author=False)
-        return True
 
-    if command.startswith("!cutlass log channel"):
-        if not is_admin(message):
-            await message.reply("Only the Admiralty may move the Captain's Log.", mention_author=False)
-            return True
-        channel = message.channel_mentions[0] if message.channel_mentions else None
-        if channel is None:
-            await message.reply("Use: `!cutlass log channel #captains-log`", mention_author=False)
-            return True
-        await set_guild_setting(message.guild.id, "chronicle_channel_id", channel.id)
-        invalidate_settings_cache(message.guild.id)
-        await message.reply("Captain's Log set to " + channel.mention + ".", mention_author=False)
-        return True
 
-    if command in ("!cutlass log on", "!cutlass log off"):
-        if not is_admin(message):
-            return True
-        enabled = command.endswith(" on")
-        if enabled:
-            settings = await cached_settings(message.guild.id)
-            if not settings.get("chronicle_channel_id"):
-                await message.reply("Set the channel first with `!cutlass log channel #captains-log`.", mention_author=False)
-                return True
-        await set_guild_setting(message.guild.id, "chronicle_enabled", 1 if enabled else 0)
-        invalidate_settings_cache(message.guild.id)
-        await message.reply("Captain's Log is now " + ("enabled." if enabled else "disabled."), mention_author=False)
-        return True
 
-    if command == "!cutlass chronicle latest":
-        row = await get_latest_chronicle(message.guild.id)
-        await message.reply((row[0] if row else "No chronicle has been written yet.")[:1900], mention_author=False)
-        return True
 
-    if command == "!cutlass chronicle now":
-        if not is_admin(message):
-            return True
-        chronicle, error = await generate_chronicle(message.guild)
-        await message.reply("Chronicle posted to the Captain's Log." if chronicle else error, mention_author=False)
-        return True
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     if await handle_parrot_command(
@@ -4033,994 +3746,55 @@ async def handle_commands(
         return True
 
 
-    if command == "!cutlass creator":
 
-        if is_creator(
-            message.author.id
-        ):
-
-            await message.reply(
-                (
-                    "Aye, Shipwright. Ye be the scallywag "
-                    "responsible for dragging this old pirate aboard."
-                ),
-                mention_author=False
-            )
-
-        else:
 
-            await message.reply(
-                (
-                    "Nay. Me creator be somewhere aboard, "
-                    "probably adding another container."
-                ),
-                mention_author=False
-            )
 
-        return True
-
-
-    if command == "!cutlass memory":
 
-        memories = await get_user_memories(
-            message.guild.id,
-            message.author.id,
-            20
-        )
-
-        text = (
-            "Me memory chest be empty for ye so far."
-        )
 
-        if memories:
 
-            text = (
-                "**Memory chest:**\n"
-                + "\n".join(
-                    "- "
-                    + memory
-                    for memory in memories
-                )
-            )
 
 
-        await message.reply(
-            text,
-            mention_author=False
-        )
 
-        return True
 
 
-    if command == "!cutlass relationship":
 
-        (
-            relationship,
-            jokes,
-            events
-        ) = await asyncio.gather(
 
-            get_relationship(
-                message.guild.id,
-                message.author.id
-            ),
 
-            get_running_jokes(
-                message.guild.id,
-                message.author.id,
-                5
-            ),
 
-            get_relationship_events(
-                message.guild.id,
-                message.author.id,
-                5
-            )
-        )
 
 
-        if not relationship:
 
-            await message.reply(
-                "We have not sailed enough seas yet.",
-                mention_author=False
-            )
 
-            return True
 
 
-        text = (
-            "**Relationship:** "
-            + relationship[
-                "relationship_type"
-            ]
-            + "\n**Familiarity:** "
-            + str(
-                relationship[
-                    "familiarity"
-                ]
-            )
-            + "/100"
-        )
 
 
-        if relationship[
-            "nickname"
-        ]:
 
-            text += (
-                "\n**Nickname:** "
-                + relationship[
-                    "nickname"
-                ]
-            )
 
 
-        if relationship[
-            "opinion"
-        ]:
 
-            text += (
-                "\n**Opinion:** "
-                + relationship[
-                    "opinion"
-                ]
-            )
 
 
-        if jokes:
 
-            text += (
-                "\n\n**Running jokes:**"
-            )
 
-            for joke in jokes:
 
-                text += (
-                    "\n- "
-                    + joke
-                )
 
 
-        if events:
 
-            text += (
-                "\n\n**Shared events:**"
-            )
 
-            for event in events:
 
-                text += (
-                    "\n- "
-                    + event[
-                        "event"
-                    ]
-                )
 
 
-        await message.reply(
-            text,
-            mention_author=False
-        )
 
-        return True
 
 
-    if command == "!cutlass lore":
 
-        lore = await get_captain_lore(
-            15
-        )
 
-        text = (
-            "Me legendary career has not been documented yet."
-        )
-
-        if lore:
-
-            text = (
-                "**Tales from me questionable past:**\n"
-                + "\n".join(
-                    "- "
-                    + item[
-                        "lore"
-                    ]
-                    for item in lore
-                )
-            )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass canon":
-
-        text = await format_captain_canon()
-
-        await message.reply(
-            text[:1900],
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass serverlore":
-
-        lore = await get_server_lore(
-            message.guild.id,
-            15
-        )
-
-        text = (
-            "This ship has not accumulated enough questionable history yet."
-        )
-
-        if lore:
-
-            text = (
-                "**Ship lore:**\n"
-                + "\n".join(
-                    "- "
-                    + item
-                    for item in lore
-                )
-            )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass stats":
-
-        stats = await get_stats(
-            message.guild.id
-        )
-
-        text = (
-            "**Captain Cutlass Stats**\n"
-            "Crew profiles: "
-            + str(stats["members"])
-            + "\nMemories: "
-            + str(stats["memories"])
-            + "\nRunning jokes: "
-            + str(stats["jokes"])
-            + "\nShared events: "
-            + str(stats["events"])
-            + "\nCaptain lore: "
-            + str(stats["captain_lore"])
-            + "\nServer lore: "
-            + str(stats["server_lore"])
-            + "\nSaved quotes: "
-            + str(stats["quotes"])
-            + "\nAchievements: "
-            + str(stats["achievements"])
-            + "\nTimeline entries: "
-            + str(stats["timeline"])
-            + "\nTotal doubloons: "
-            + str(stats["doubloons"])
-        )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass crew":
-
-        crew = await get_top_crew(
-            message.guild.id,
-            10
-        )
-
-
-        if not crew:
-
-            await message.reply(
-                "No crew rankings yet.",
-                mention_author=False
-            )
-
-            return True
-
-
-        lines = []
-
-
-        for number, row in enumerate(
-            crew,
-            start=1
-        ):
-
-            display = (
-                row[1]
-                if row[1]
-                else row[0]
-            )
-
-
-            lines.append(
-                (
-                    str(number)
-                    + ". "
-                    + str(display)
-                    + " - "
-                    + str(row[2])
-                    + " ("
-                    + str(row[3])
-                    + "/100)"
-                )
-            )
-
-
-        await message.reply(
-            (
-                "**Captain's Top Crewmates**\n"
-                + "\n".join(
-                    lines
-                )
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass balance":
-
-        balance = await get_doubloons(
-            message.guild.id,
-            message.author.id
-        )
-
-
-        await message.reply(
-            (
-                "Ye currently have **"
-                + str(balance)
-                + " doubloons**."
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass achievements":
-
-        achievements = await get_achievements(
-            message.guild.id,
-            message.author.id
-        )
-
-
-        if not achievements:
-
-            await message.reply(
-                "Ye have not earned any achievements yet.",
-                mention_author=False
-            )
-
-            return True
-
-
-        text = (
-            "**Yer achievements:**"
-        )
-
-
-        for (
-            achievement,
-            description
-        ) in achievements:
-
-            text += (
-                "\n- **"
-                + achievement
-                + "**"
-            )
-
-            if description:
-
-                text += (
-                    " - "
-                    + description
-                )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass leaderboard":
-
-        crew = await get_doubloon_leaderboard(
-            message.guild.id,
-            10
-        )
-
-
-        if not crew:
-
-            await message.reply(
-                "The treasury ledger be empty.",
-                mention_author=False
-            )
-
-            return True
-
-
-        lines = []
-
-
-        for number, row in enumerate(
-            crew,
-            start=1
-        ):
-
-            username = (
-                row[0]
-                or "Unknown Crewmate"
-            )
-
-            display = (
-                row[1]
-                if row[1]
-                else username
-            )
-
-            lines.append(
-                (
-                    str(number)
-                    + ". "
-                    + str(display)
-                    + " - "
-                    + str(row[2])
-                    + " doubloons"
-                )
-            )
-
-
-        await message.reply(
-            (
-                "**Doubloon Leaderboard**\n"
-                + "\n".join(
-                    lines
-                )
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass wisdom":
-
-        await message.reply(
-            random_wisdom(),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass quote":
-
-        quote = await get_random_quote(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                quote
-                if quote
-                else "Me quote book be suspiciously empty."
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass savequote":
-
-        return await handle_quote_save(
-            message
-        )
-
-
-    if command == "!cutlass journal":
-
-        entries = await get_journal(
-            message.guild.id,
-            5
-        )
-
-
-        if not entries:
-
-            await message.reply(
-                "Me journal pages are blank.",
-                mention_author=False
-            )
-
-            return True
-
-
-        text = (
-            "**Captain's Journal**"
-        )
-
-
-        for (
-            entry,
-            date
-        ) in entries:
-
-            text += (
-                "\n\n**"
-                + str(date)
-                + "**\n"
-                + entry
-            )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass timeline":
-
-        entries = await get_timeline(
-            message.guild.id,
-            10
-        )
-
-
-        if not entries:
-
-            await message.reply(
-                "The ship's timeline be empty.",
-                mention_author=False
-            )
-
-            return True
-
-
-        text = (
-            "**Captain's Timeline**"
-        )
-
-
-        for (
-            entry,
-            date
-        ) in entries:
-
-            text += (
-                "\n\n**"
-                + str(date)
-                + "**\n"
-                + entry
-            )
-
-
-        await message.reply(
-            text,
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass mood":
-
-        settings = await cached_settings(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                "Current mood: **"
-                + settings[
-                    "mood"
-                ]
-                + "**"
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass forgetme":
-
-        await delete_user_memories(
-            message.guild.id,
-            message.author.id
-        )
-
-
-        await message.reply(
-            "Yer personal memory chest has been tossed overboard.",
-            mention_author=False
-        )
-
-        return True
-
-
-    if command == "!cutlass treasure clue":
-
-        hunt = await get_treasure_hunt(
-            message.guild.id
-        )
-
-
-        if (
-            not hunt
-            or not hunt[
-                "active"
-            ]
-        ):
-
-            await message.reply(
-                "There be no active treasure hunt.",
-                mention_author=False
-            )
-
-            return True
-
-
-        await message.reply(
-            (
-                "Treasure clue: "
-                + hunt[
-                    "clue"
-                ]
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command.startswith(
-        "!cutlass quiet "
-    ):
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may silence the captain.",
-                mention_author=False
-            )
-
-            return True
-
-
-        value = command.split()[
-            -1
-        ]
-
-
-        if value not in (
-            "on",
-            "off"
-        ):
-
-            return True
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "quiet",
-            (
-                1
-                if value == "on"
-                else 0
-            )
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                "Captain is now quiet."
-                if value == "on"
-                else "Captain is back on deck."
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command.startswith(
-        "!cutlass mood "
-    ):
-
-        if not is_admin(
-            message
-        ):
-
-            await message.reply(
-                "Only the Admiralty may adjust me temperament.",
-                mention_author=False
-            )
-
-            return True
-
-
-        parts = content.split(
-            " ",
-            2
-        )
-
-
-        if len(
-            parts
-        ) < 3:
-
-            return True
-
-
-        mood = parts[
-            2
-        ].strip()[:50]
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "mood",
-            mood
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                "Captain's mood is now **"
-                + mood
-                + "**."
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command.startswith(
-        "!cutlass event "
-    ):
-
-        if not is_admin(
-            message
-        ):
-
-            return True
-
-
-        value = command.split()[
-            -1
-        ]
-
-
-        if value not in (
-            "on",
-            "off"
-        ):
-
-            return True
-
-
-        await set_guild_setting(
-            message.guild.id,
-            "event_mode",
-            (
-                1
-                if value == "on"
-                else 0
-            )
-        )
-
-
-        invalidate_settings_cache(
-            message.guild.id
-        )
-
-
-        await message.reply(
-            (
-                "Roleplay event mode activated."
-                if value == "on"
-                else "Roleplay event mode disabled."
-            ),
-            mention_author=False
-        )
-
-        return True
-
-
-    if command.startswith(
-        "!cutlass treasure start "
-    ):
-
-        if not is_admin(
-            message
-        ):
-
-            return True
-
-
-        payload = content[
-            len(
-                "!cutlass treasure start "
-            ):
-        ]
-
-
-        if "|" not in payload:
-
-            await message.reply(
-                (
-                    "Use: `!cutlass treasure start "
-                    "ANSWER | CLUE`"
-                ),
-                mention_author=False
-            )
-
-            return True
-
-
-        answer, clue = payload.split(
-            "|",
-            1
-        )
-
-
-        await start_treasure_hunt(
-            message.guild.id,
-            answer.strip(),
-            clue.strip()
-        )
-
-
-        await message.reply(
-            (
-                "A new treasure hunt has begun. "
-                "May the cleverest scallywag find it."
-            ),
-            mention_author=False
-        )
-
-        return True
 
 
     return False
 
 
-async def check_treasure_answer(
-    message
-):
-
-    hunt = await get_treasure_hunt(
-        message.guild.id
-    )
-
-
-    if (
-        not hunt
-        or not hunt[
-            "active"
-        ]
-    ):
-
-        return False
-
-
-    if (
-        message.content
-        .lower()
-        .strip()
-        != hunt[
-            "answer"
-        ]
-    ):
-
-        return False
-
-
-    await finish_treasure_hunt(
-        message.guild.id,
-        message.author.id,
-        message.author.display_name
-    )
-
-
-    await add_doubloons(
-        message.guild.id,
-        message.author.id,
-        100
-    )
-
-
-    await award_achievement(
-        message.guild.id,
-        message.author.id,
-        "Treasure Hunter",
-        "Won a Captain Cutlass treasure hunt."
-    )
-
-
-    await add_relationship_event(
-        message.guild.id,
-        message.author.id,
-        "Won one of Captain Cutlass's treasure hunts.",
-        importance=8
-    )
-
-
-    await add_timeline_entry(
-        message.guild.id,
-        (
-            message.author.display_name
-            + " won one of Captain Cutlass's treasure hunts."
-        ),
-        importance=8
-    )
-
-
-    await message.reply(
-        (
-            "Treasure found! "
-            + message.author.display_name
-            + " has claimed the booty and earned 100 doubloons!"
-        ),
-        mention_author=False
-    )
-
-    await post_captains_log(
-        message.guild,
-        "**TREASURE HUNT**\n" + message.author.mention + " found the treasure, earned **100 doubloons**, and claimed the **Treasure Hunter** achievement.",
-        "treasure"
-    )
-
-
-    return True
 
 
 @tasks.loop(hours=1)
@@ -6033,7 +4807,14 @@ async def on_message(
 
 
         if await check_treasure_answer(
-            message
+            message,
+            get_treasure_hunt=get_treasure_hunt,
+            finish_treasure_hunt=finish_treasure_hunt,
+            add_doubloons=add_doubloons,
+            award_achievement=award_achievement,
+            add_relationship_event=add_relationship_event,
+            add_timeline_entry=add_timeline_entry,
+            post_captains_log=post_captains_log
         ):
 
             return
