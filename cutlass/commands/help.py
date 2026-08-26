@@ -15,26 +15,54 @@ async def handle_help_command(
     Returns False when the command belongs to another subsystem.
     """
 
+    # =====================================================
+    # Main Help
+    # =====================================================
+
     if command in (
         "!cutlass help",
         "!cutlass commands"
     ):
-        parrot = await get_parrot(message.guild.id)
-        ship = await get_ship(message.guild.id)
+        parrot = await get_parrot(
+            message.guild.id
+        )
+
+        ship = await get_ship(
+            message.guild.id
+        )
 
         embed = discord.Embed(
             title="🏴‍☠️ Captain Cutlass Help",
             description=(
-                "Welcome aboard. Choose a category below to see the commands ye need.\n\n"
-                "**Crew & Profiles** — `!cutlass help crew`\n"
-                "**Fun, Lore & History** — `!cutlass help fun`\n"
-                f"**{parrot['name']}** — `!cutlass help parrot`\n"
-                f"**{ship['name']}** — `!cutlass help ship`\n"
-                "**Pirate World & Combat** — `!cutlass help world`\n"
-                "**Admiralty Controls** — `!cutlass help admin`\n\n"
-                "**Shortcut:** `!c` can replace `!cutlass` on any command.\n"
-                "Example: `!c ship`, `!c help world`, `!c attack`\n\n"
-                "Use `!cutlass help all` for the full command list."
+                "Welcome aboard. Choose a category below "
+                "to see the commands ye need.\n\n"
+
+                "**Crew & Profiles** — "
+                "`!cutlass help crew`\n"
+
+                "**Fun, Lore & History** — "
+                "`!cutlass help fun`\n"
+
+                f"**{parrot['name']}** — "
+                "`!cutlass help parrot`\n"
+
+                f"**{ship['name']}** — "
+                "`!cutlass help ship`\n"
+
+                "**Pirate World & Combat** — "
+                "`!cutlass help world`\n"
+
+                "**Admiralty Controls** — "
+                "`!cutlass help admin`\n\n"
+
+                "**Shortcut:** `!c` can replace "
+                "`!cutlass` on any command.\n"
+
+                "Example: `!c ship`, `!c explore`, "
+                "`!c attack`\n\n"
+
+                "Use `!cutlass help all` for the "
+                "full command list."
             ),
             color=0x3498DB
         )
@@ -50,7 +78,12 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Crew
+    # =====================================================
+
     if command == "!cutlass help crew":
+
         embed = discord.Embed(
             title="👤 Crew & Profile Commands",
             color=0x3498DB
@@ -58,8 +91,8 @@ async def handle_help_command(
 
         embed.description = (
             "`!cutlass profile` — View your crew profile\n"
-            "`!cutlass memory` — View Captain's memories of you\n"
-            "`!cutlass relationship` — View your relationship with Captain\n"
+            "`!cutlass memory` — Captain's memories of you\n"
+            "`!cutlass relationship` — Relationship with Captain\n"
             "`!cutlass creator` — Creator recognition\n"
             "`!cutlass balance` — View your Doubloons\n"
             "`!cutlass achievements` — View achievements\n"
@@ -69,7 +102,7 @@ async def handle_help_command(
             "`!cutlass birthday` — View your birthday\n"
             "`!cutlass birthday set <month> <day>` — Set birthday\n"
             "`!cutlass birthday clear` — Remove birthday\n"
-            "`!cutlass birthdays` — View crew birthdays\n"
+            "`!cutlass birthdays` — Crew birthdays\n"
             "`!cutlass forgetme` — Forget stored member memories"
         )
 
@@ -80,7 +113,12 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Fun / Lore
+    # =====================================================
+
     if command == "!cutlass help fun":
+
         embed = discord.Embed(
             title="🎭 Fun, Lore & History",
             color=0x3498DB
@@ -109,7 +147,12 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Parrot
+    # =====================================================
+
     if command == "!cutlass help parrot":
+
         parrot = await get_parrot(
             message.guild.id
         )
@@ -159,19 +202,28 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Living Ship
+    # =====================================================
+
     if command == "!cutlass help ship":
+
         ship = await get_ship(
             message.guild.id
         )
 
         embed = discord.Embed(
-            title="🚢 " + ship["name"] + " — Ship World",
+            title="🚢 " + ship["name"] + " — Living Ship",
             description=(
                 "Level **"
                 + str(ship["level"])
                 + "** • Treasury **"
                 + str(ship["treasury"])
-                + " Doubloons**"
+                + " Doubloons**\n\n"
+
+                "The Living Ship is shared by the whole crew. "
+                "Damage, supplies, voyages, combat, XP, and "
+                "upgrades persist across the server."
             ),
             color=0x3498DB
         )
@@ -179,13 +231,13 @@ async def handle_help_command(
         embed.add_field(
             name="Ship Commands",
             value=(
-                "`!cutlass ship` — Ship status\n"
-                "`!cutlass ship history` — Ship history\n"
-                "`!cutlass ship treasury` — Treasury\n"
-                "`!cutlass ship donate <amount>` — Donate Doubloons\n"
-                "`!cutlass ship repair` — Repair ship\n"
-                "`!cutlass ship upgrades` — View upgrades\n"
-                "`!cutlass ship upgrade <name>` — Buy upgrade"
+                "`!c ship` — Current ship status\n"
+                "`!c ship history` — Recorded ship history\n"
+                "`!c ship treasury` — Treasury\n"
+                "`!c ship donate <amount>` — Donate Doubloons\n"
+                "`!c ship repair` — Repair the ship\n"
+                "`!c ship upgrades` — View upgrades\n"
+                "`!c ship upgrade <name>` — Purchase an upgrade"
             ),
             inline=False
         )
@@ -193,9 +245,27 @@ async def handle_help_command(
         embed.add_field(
             name="Voyages",
             value=(
-                "`!cutlass voyage destinations` — Available voyages\n"
-                "`!cutlass voyage status` — Current voyage\n"
-                "`!cutlass voyage start <number>` — Begin voyage"
+                "`!c voyage` — Charted voyage destinations\n"
+                "`!c voyage destinations` — Charted destinations\n"
+                "`!c voyage status` — Current voyage\n"
+                "`!c voyage start <number>` — Set sail\n\n"
+
+                "Only charted islands can be reached. "
+                "Some routes also require a higher "
+                "Living Ship level."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Exploration",
+            value=(
+                "`!c explore` — Scout surrounding waters\n"
+                "`!c island` — Inspect the current island\n"
+                "`!c island explore` — Explore the current island\n\n"
+
+                "Scouting can discover islands but does not move "
+                "the Living Ship. Voyages physically move her."
             ),
             inline=False
         )
@@ -207,40 +277,78 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Pirate World
+    # =====================================================
+
     if command == "!cutlass help world":
+
         embed = discord.Embed(
             title="🌍 Pirate World & Combat",
-            description=(
-                "**World & Exploration**\n"
-                "`!cutlass world` — Pirate World status\n"
-                "`!cutlass world map` — View discovered regions and islands\n"
-                "`!cutlass world locations` — View discovered locations\n"
-                "`!cutlass world history` — View world history\n"
-                "`!cutlass explore` — Explore the Pirate World\n"
-                "`!cutlass island` — View the current island\n"
-                "`!cutlass island explore` — Explore the current island\n\n"
+            color=0x3498DB
+        )
 
-                "**Combat**\n"
+        embed.add_field(
+            name="World & Scouting",
+            value=(
+                "`!c world` — Pirate World status\n"
+                "`!c world map` — Discovered regions and islands\n"
+                "`!c world locations` — Discovered locations\n"
+                "`!c world history` — World discovery history\n"
+                "`!c explore` — Scout surrounding waters\n\n"
+
+                "Scouting may discover new islands. "
+                "It does **not** physically move the Living Ship."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Island Exploration",
+            value=(
+                "`!c island` — View the island at the ship's location\n"
+                "`!c island explore` — Explore that island\n\n"
+
+                "Island exploration can uncover treasure, supplies, "
+                "lore, strange events, monsters, and legendary "
+                "encounters. Revisited islands use an exploration "
+                "cooldown."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Unified Combat",
+            value=(
                 "`!c attack` — Attack the active encounter\n"
                 "`!c defend` — Defend when supported\n"
                 "`!c board` — Board an enemy vessel when supported\n"
-                "`!c flee` — Flee when supported\n\n"
+                "`!c flee` — Attempt to flee when supported\n\n"
 
-                "The same commands also work with the full `!cutlass` prefix.\n"
-                "Combat automatically targets the active naval battle, "
-                "sea monster, or boss encounter.\n\n"
+                "Combat automatically targets the active naval "
+                "battle, sea monster, or boss encounter."
+            ),
+            inline=False
+        )
 
-                "**Encounter Status**\n"
+        embed.add_field(
+            name="Encounter Status",
+            value=(
                 "`!c battle` — Current naval battle\n"
-                "`!c monster` — Current monster encounter\n"
-                "`!c boss` — Current boss encounter\n\n"
+                "`!c monster` — Current sea monster encounter\n"
+                "`!c boss` — Current legendary boss encounter"
+            ),
+            inline=False
+        )
 
-                "**Legacy / Advanced Aliases**\n"
+        embed.add_field(
+            name="Legacy / Advanced Aliases",
+            value=(
                 "`!cutlass battle attack/defend/board/flee`\n"
                 "`!cutlass monster attack`\n"
                 "`!cutlass boss attack/defend`"
             ),
-            color=0x3498DB
+            inline=False
         )
 
         await message.reply(
@@ -250,11 +358,18 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Admiralty
+    # =====================================================
 
     if command == "!cutlass help admin":
+
         embed = discord.Embed(
             title="⚙️ Admiralty Controls",
-            description="Administrative Captain Cutlass settings.",
+            description=(
+                "Server configuration commands reserved "
+                "for the Admiralty."
+            ),
             color=0x3498DB
         )
 
@@ -284,14 +399,12 @@ async def handle_help_command(
         )
 
         embed.add_field(
-            name="Ship World",
+            name="Ship World Configuration",
             value=(
                 "`!cutlass ship channel #channel`\n"
                 "`!cutlass ship on/off`\n"
                 "`!cutlass ship status`\n"
-                "`!cutlass ship name <name>`\n"
-                "`!cutlass ship upgrade <name>`\n"
-                "`!cutlass voyage start <number>`"
+                "`!cutlass ship name <name>`"
             ),
             inline=False
         )
@@ -307,6 +420,13 @@ async def handle_help_command(
             inline=False
         )
 
+        embed.set_footer(
+            text=(
+                "Admiralty configures the Ship World. "
+                "The crew plays the Ship World."
+            )
+        )
+
         await message.reply(
             embed=embed,
             mention_author=False
@@ -314,49 +434,63 @@ async def handle_help_command(
 
         return True
 
+    # =====================================================
+    # Full Command List
+    # =====================================================
+
     if command == "!cutlass help all":
+
         pages = [
             (
                 "**Crew & Profiles**\n"
-                "`!cutlass profile`\n"
-                "`!cutlass memory`\n"
-                "`!cutlass relationship`\n"
-                "`!cutlass balance`\n"
-                "`!cutlass achievements`\n"
-                "`!cutlass leaderboard`\n"
-                "`!cutlass birthday`\n"
-                "`!cutlass birthdays`"
+                "`!c profile`\n"
+                "`!c memory`\n"
+                "`!c relationship`\n"
+                "`!c balance`\n"
+                "`!c achievements`\n"
+                "`!c leaderboard`\n"
+                "`!c crew`\n"
+                "`!c stats`\n"
+                "`!c birthday`\n"
+                "`!c birthdays`\n"
+                "`!c forgetme`"
             ),
             (
-                "**Fun & History**\n"
-                "`!cutlass lore`\n"
-                "`!cutlass canon`\n"
-                "`!cutlass serverlore`\n"
-                "`!cutlass quote`\n"
-                "`!cutlass wisdom`\n"
-                "`!cutlass journal`\n"
-                "`!cutlass timeline`\n"
-                "`!cutlass story`\n"
-                "`!cutlass punbattle`\n"
-                "`!cutlass chronicle latest`"
+                "**Fun, Lore & History**\n"
+                "`!c lore`\n"
+                "`!c canon`\n"
+                "`!c serverlore`\n"
+                "`!c quote`\n"
+                "`!c wisdom`\n"
+                "`!c journal`\n"
+                "`!c timeline`\n"
+                "`!c story`\n"
+                "`!c punbattle`\n"
+                "`!c chronicle latest`\n"
+                "`!c mood`"
             ),
             (
                 "**Parrot**\n"
-                "`!cutlass parrot`\n"
-                "`!cutlass parrot talk <message>`\n"
-                "`!cutlass parrot relationship`\n"
-                "`!cutlass parrot memories`\n"
-                "`!cutlass parrot jokes`\n"
-                "`!cutlass parrot history`"
+                "`!c parrot`\n"
+                "`!c parrot talk <message>`\n"
+                "`!c parrot relationship`\n"
+                "`!c parrot memories`\n"
+                "`!c parrot jokes`\n"
+                "`!c parrot history`\n"
+                "`!c parrot mood`"
             ),
             (
-                "**Pirate World & Combat**\n"
-                "`!cutlass world`\n"
-                "`!cutlass world map`\n"
-                "`!cutlass world locations`\n"
-                "`!cutlass explore`\n"
-                "`!cutlass island`\n"
-                "`!cutlass island explore`\n"
+                "**Pirate World & Exploration**\n"
+                "`!c world`\n"
+                "`!c world map`\n"
+                "`!c world locations`\n"
+                "`!c world history`\n"
+                "`!c explore` — Scout surrounding waters\n"
+                "`!c island` — Current island\n"
+                "`!c island explore` — Explore current island"
+            ),
+            (
+                "**Combat**\n"
                 "`!c attack` — Attack active encounter\n"
                 "`!c defend` — Defend when supported\n"
                 "`!c board` — Board when supported\n"
@@ -366,20 +500,24 @@ async def handle_help_command(
                 "`!c boss` — Boss status"
             ),
             (
-                "**Ship World**\n"
-                "`!cutlass ship`\n"
-                "`!cutlass ship history`\n"
-                "`!cutlass ship treasury`\n"
-                "`!cutlass ship donate <amount>`\n"
-                "`!cutlass ship repair`\n"
-                "`!cutlass ship upgrades`\n"
-                "`!cutlass voyage destinations`\n"
-                "`!cutlass voyage status`"
+                "**Living Ship & Voyages**\n"
+                "`!c ship`\n"
+                "`!c ship history`\n"
+                "`!c ship treasury`\n"
+                "`!c ship donate <amount>`\n"
+                "`!c ship repair`\n"
+                "`!c ship upgrades`\n"
+                "`!c ship upgrade <name>`\n"
+                "`!c voyage`\n"
+                "`!c voyage status`\n"
+                "`!c voyage start <number>`"
             )
         ]
 
         for page in pages:
-            await message.channel.send(page)
+            await message.channel.send(
+                page
+            )
 
         return True
 
