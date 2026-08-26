@@ -429,7 +429,9 @@ async def handle_ship_command(
         "!cutlass voyage destinations"
     ):
         await message.reply(
-            format_destinations(),
+            await format_destinations(
+                message.guild.id
+            ),
             mention_author=False
         )
 

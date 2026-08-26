@@ -32,6 +32,8 @@ async def handle_help_command(
                 f"**{ship['name']}** — `!cutlass help ship`\n"
                 "**Pirate World & Combat** — `!cutlass help world`\n"
                 "**Admiralty Controls** — `!cutlass help admin`\n\n"
+                "**Shortcut:** `!c` can replace `!cutlass` on any command.\n"
+                "Example: `!c ship`, `!c help world`, `!c attack`\n\n"
                 "Use `!cutlass help all` for the full command list."
             ),
             color=0x3498DB
@@ -218,21 +220,25 @@ async def handle_help_command(
                 "`!cutlass island` — View the current island\n"
                 "`!cutlass island explore` — Explore the current island\n\n"
 
-                "**Naval Combat**\n"
-                "`!cutlass battle` — Current naval battle\n"
-                "`!cutlass battle attack` — Fire on the enemy\n"
-                "`!cutlass battle defend` — Brace for incoming fire\n"
-                "`!cutlass battle board` — Boarding action status\n"
-                "`!cutlass battle flee` — Attempt to escape\n\n"
+                "**Combat**\n"
+                "`!c attack` — Attack the active encounter\n"
+                "`!c defend` — Defend when supported\n"
+                "`!c board` — Board an enemy vessel when supported\n"
+                "`!c flee` — Flee when supported\n\n"
 
-                "**Sea Monsters**\n"
-                "`!cutlass monster` — Current monster encounter\n"
-                "`!cutlass monster attack` — Attack the monster\n\n"
+                "The same commands also work with the full `!cutlass` prefix.\n"
+                "Combat automatically targets the active naval battle, "
+                "sea monster, or boss encounter.\n\n"
 
-                "**Boss Encounters**\n"
-                "`!cutlass boss` — Current boss encounter\n"
-                "`!cutlass boss attack` — Attack the boss\n"
-                "`!cutlass boss defend` — Defend against the boss"
+                "**Encounter Status**\n"
+                "`!c battle` — Current naval battle\n"
+                "`!c monster` — Current monster encounter\n"
+                "`!c boss` — Current boss encounter\n\n"
+
+                "**Legacy / Advanced Aliases**\n"
+                "`!cutlass battle attack/defend/board/flee`\n"
+                "`!cutlass monster attack`\n"
+                "`!cutlass boss attack/defend`"
             ),
             color=0x3498DB
         )
@@ -351,15 +357,13 @@ async def handle_help_command(
                 "`!cutlass explore`\n"
                 "`!cutlass island`\n"
                 "`!cutlass island explore`\n"
-                "`!cutlass battle`\n"
-                "`!cutlass battle attack`\n"
-                "`!cutlass battle defend`\n"
-                "`!cutlass battle flee`\n"
-                "`!cutlass monster`\n"
-                "`!cutlass monster attack`\n"
-                "`!cutlass boss`\n"
-                "`!cutlass boss attack`\n"
-                "`!cutlass boss defend`"
+                "`!c attack` — Attack active encounter\n"
+                "`!c defend` — Defend when supported\n"
+                "`!c board` — Board when supported\n"
+                "`!c flee` — Flee when supported\n"
+                "`!c battle` — Naval battle status\n"
+                "`!c monster` — Monster status\n"
+                "`!c boss` — Boss status"
             ),
             (
                 "**Ship World**\n"

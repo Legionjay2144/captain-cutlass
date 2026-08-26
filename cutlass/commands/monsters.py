@@ -81,9 +81,14 @@ async def handle_monster_command(
             )
             return True
 
+        ship = await get_ship(
+            message.guild.id
+        )
+
         created, result = await start_monster_encounter(
             message.guild.id,
-            key
+            key,
+            ship=ship
         )
 
         if not created:
@@ -120,8 +125,13 @@ async def handle_monster_command(
 
     if command == "!cutlass monster attack":
 
-        ok, text, result = await attack_monster(
+        ship = await get_ship(
             message.guild.id
+        )
+
+        ok, text, result = await attack_monster(
+            message.guild.id,
+            ship=ship
         )
 
         if not ok:
@@ -153,6 +163,42 @@ async def handle_monster_command(
                 + str(ship_after["hull"])
                 + "**"
             )
+
+            if int(ship_after["hull"]) <= 0:
+
+                text += (
+                    "\n\n**SHIP DISABLED!**\n"
+                    "The monster has battered the hull to zero. "
+                    "The crew can no longer continue the fight."
+                )
+
+                await add_ship_history(
+                    message.guild.id,
+                    (
+                        "The ship was disabled while fighting "
+                        + str(
+                            result.get(
+                                "name",
+                                "a sea monster"
+                            )
+                        )
+                        + "."
+                    ),
+                    "monster_defeat"
+                )
+
+                await post_captains_log(
+                    message.guild,
+                    text,
+                    "monster"
+                )
+
+                await message.reply(
+                    text[:1900],
+                    mention_author=False
+                )
+
+                return True
 
         if result.get("victory"):
 

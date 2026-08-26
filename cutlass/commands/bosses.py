@@ -89,8 +89,13 @@ async def handle_boss_command(
 
     if command == "!cutlass boss attack":
 
-        ok, text, result = await attack_boss(
+        ship = await get_ship(
             message.guild.id
+        )
+
+        ok, text, result = await attack_boss(
+            message.guild.id,
+            ship=ship
         )
 
         if not ok:
@@ -202,8 +207,13 @@ async def handle_boss_command(
 
     if command == "!cutlass boss defend":
 
-        ok, text, result = await defend_boss(
+        ship = await get_ship(
             message.guild.id
+        )
+
+        ok, text, result = await defend_boss(
+            message.guild.id,
+            ship=ship
         )
 
         if not ok:

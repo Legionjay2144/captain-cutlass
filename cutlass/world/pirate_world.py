@@ -149,6 +149,14 @@ async def initialize_pirate_world():
             PRIMARY KEY (guild_id, location_key)
         );
 
+        CREATE TABLE IF NOT EXISTS island_activity_state (
+            guild_id INTEGER NOT NULL,
+            location_key TEXT NOT NULL,
+            visits INTEGER DEFAULT 0,
+            last_explored_at DATETIME,
+            PRIMARY KEY (guild_id, location_key)
+        );
+
         CREATE TABLE IF NOT EXISTS world_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
@@ -401,6 +409,16 @@ async def explore_random_island(
     user_id,
     username
 ):
+    """
+    Scout the surrounding seas.
+
+    Exploration represents scouting and charting rather
+    than physically moving the Living Ship.
+
+    New islands are discovered gradually. Treasure,
+    supplies, island lore, and island-specific encounters
+    belong to physical island exploration after arrival.
+    """
 
     discovered = await get_discovered_locations(
         guild_id
@@ -417,59 +435,104 @@ async def explore_random_island(
         if key not in discovered_keys
     ]
 
-    if undiscovered:
+    # -----------------------------------------------------
+    # Discovery roll
+    #
+    # Only 25% of scouting attempts reveal a new island.
+    # This prevents the entire world from being discovered
+    # after only a handful of explore commands.
+    # -----------------------------------------------------
+
+    discover_new = (
+        bool(undiscovered)
+        and random.randint(1, 100) <= 25
+    )
+
+    if discover_new:
+
         location_key = random.choice(
             undiscovered
         )
-    else:
-        location_key = random.choice(
-            list(ISLANDS.keys())
+
+        is_new, _ = await discover_location(
+            guild_id,
+            location_key,
+            user_id,
+            username
         )
 
-    is_new, result = await discover_location(
-        guild_id,
-        location_key,
-        user_id,
-        username
-    )
+    else:
 
-    island = ISLANDS[location_key]
-    region = REGIONS[island["region"]]
+        is_new = False
+
+        # Scout somewhere already charted. Blacktooth Cove
+        # acts as the crew's starting known waters before
+        # the first true discovery has been made.
+        known_keys = list(
+            discovered_keys
+        )
+
+        if not known_keys:
+            known_keys = [
+                "blacktooth_cove"
+            ]
+
+        location_key = random.choice(
+            known_keys
+        )
+
+    island = ISLANDS[
+        location_key
+    ]
+
+    region = REGIONS[
+        island["region"]
+    ]
+
+    # -----------------------------------------------------
+    # Scouting encounters
+    #
+    # Scouting happens from the ship at sea. Physical
+    # island rewards are intentionally excluded here.
+    # -----------------------------------------------------
 
     encounter_roll = random.randint(
         1,
         100
     )
 
-    if encounter_roll <= 25:
+    if encounter_roll <= 10:
+
         encounter_type = "naval"
+
         encounter = (
-            "The crew found signs of another pirate crew nearby."
+            "Lookouts spotted unfamiliar sails "
+            "moving through the surrounding waters."
         )
 
-    elif encounter_roll <= 45:
-        encounter_type = "treasure"
-        encounter = (
-            "A half-buried treasure marker was discovered."
-        )
+    elif encounter_roll <= 15:
 
-    elif encounter_roll <= 60:
         encounter_type = "monster"
-        encounter = (
-            "Something enormous moved beneath the water offshore."
-        )
 
-    elif encounter_roll <= 75:
-        encounter_type = "supplies"
         encounter = (
-            "The crew discovered useful supplies abandoned on the beach."
+            "Something enormous moved beneath "
+            "the scouting vessel."
         )
 
     else:
+
         encounter_type = "quiet"
-        encounter = (
-            "The island was strangely quiet... perhaps too quiet."
-        )
+
+        if is_new:
+            encounter = (
+                "The crew charted the island from offshore "
+                "and marked it on the ship's maps."
+            )
+        else:
+            encounter = (
+                "The crew charted currents, reefs, and "
+                "landmarks but found nothing immediately dangerous."
+            )
 
     return {
         "new": is_new,
@@ -481,6 +544,103 @@ async def explore_random_island(
         "encounter_type": encounter_type,
         "encounter": encounter,
     }
+
+
+# ---------------------------------------------------------
+# Island revisit progression
+# ---------------------------------------------------------
+
+async def get_island_activity_state(
+    guild_id,
+    location_key
+):
+    db = await _db()
+
+    try:
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    visits,
+                    last_explored_at
+                FROM island_activity_state
+                WHERE guild_id = ?
+                  AND location_key = ?
+                """,
+                (
+                    guild_id,
+                    location_key,
+                )
+            )
+        ).fetchone()
+
+        if not row:
+            return {
+                "visits": 0,
+                "last_explored_at": None,
+            }
+
+        return {
+            "visits": int(row["visits"]),
+            "last_explored_at": row["last_explored_at"],
+        }
+
+    finally:
+        await db.close()
+
+
+async def record_island_visit(
+    guild_id,
+    location_key
+):
+    db = await _db()
+
+    try:
+        await db.execute(
+            """
+            INSERT INTO island_activity_state (
+                guild_id,
+                location_key,
+                visits,
+                last_explored_at
+            )
+            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+
+            ON CONFLICT(
+                guild_id,
+                location_key
+            )
+            DO UPDATE SET
+                visits = visits + 1,
+                last_explored_at = CURRENT_TIMESTAMP
+            """,
+            (
+                guild_id,
+                location_key,
+            )
+        )
+
+        await db.commit()
+
+        row = await (
+            await db.execute(
+                """
+                SELECT visits
+                FROM island_activity_state
+                WHERE guild_id = ?
+                  AND location_key = ?
+                """,
+                (
+                    guild_id,
+                    location_key,
+                )
+            )
+        ).fetchone()
+
+        return int(row["visits"])
+
+    finally:
+        await db.close()
 
 
 # ---------------------------------------------------------

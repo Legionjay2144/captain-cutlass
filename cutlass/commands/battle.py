@@ -10,6 +10,7 @@ async def handle_battle_command(
     format_battle,
     attack_enemy,
     defend,
+    board_enemy,
     flee_battle,
     damage_ship,
     reward_ship,
@@ -91,7 +92,8 @@ async def handle_battle_command(
             return True
 
         created, battle = await start_naval_battle(
-            message.guild.id
+            message.guild.id,
+            ship=ship
         )
 
         if not created:
@@ -291,7 +293,8 @@ async def handle_battle_command(
             return True
 
         ok, text, result = await defend(
-            message.guild.id
+            message.guild.id,
+            ship=ship
         )
 
         if not ok:
@@ -366,17 +369,135 @@ async def handle_battle_command(
 
     if command == "!cutlass battle board":
 
+        ship = await get_ship(
+            message.guild.id
+        )
+
+        if int(ship["hull"]) <= 0:
+            await message.reply(
+                "**THE SHIP IS DISABLED**\n"
+                "The hull is too badly damaged to board another vessel.",
+                mention_author=False
+            )
+            return True
+
+        ok, text, result = await board_enemy(
+            message.guild.id,
+            ship=ship
+        )
+
+        if not ok:
+            await message.reply(
+                text,
+                mention_author=False
+            )
+            return True
+
+        result = result or {}
+
+        enemy_damage = int(
+            result.get(
+                "enemy_damage",
+                0
+            )
+        )
+
+        if enemy_damage > 0:
+
+            ship_after = await damage_ship(
+                message.guild.id,
+                enemy_damage
+            )
+
+            text += (
+                "\n\n**"
+                + str(ship_after["name"])
+                + "**\n"
+                "Hull: **"
+                + str(ship_after["hull"])
+                + "**"
+            )
+
+            if int(ship_after["hull"]) <= 0:
+
+                text += (
+                    "\n\n**SHIP DISABLED!**\n"
+                    "The failed boarding action has left "
+                    "the ship unable to continue fighting."
+                )
+
+                await add_ship_history(
+                    message.guild.id,
+                    "The ship was disabled during a failed boarding action.",
+                    "battle_defeat"
+                )
+
+        if result.get("victory"):
+
+            reward = int(
+                result.get(
+                    "reward",
+                    0
+                )
+            )
+
+            xp_reward = int(
+                result.get(
+                    "xp",
+                    0
+                )
+            )
+
+            awarded = await reward_ship(
+                message.guild.id,
+                doubloons=reward,
+                xp_reward=xp_reward
+            )
+
+            text += (
+                "\n\n**LIVING SHIP UPDATED**\n"
+                "Treasury: **+"
+                + str(reward)
+                + " doubloons**\n"
+                "Ship XP: **+"
+                + str(xp_reward)
+                + "**"
+            )
+
+            if awarded["levels_gained"]:
+                text += (
+                    "\nThe ship reached **Level "
+                    + str(awarded["level"])
+                    + "**!"
+                )
+
+            await add_ship_history(
+                message.guild.id,
+                (
+                    "Captured "
+                    + str(result.get(
+                        "enemy_name",
+                        "an enemy vessel"
+                    ))
+                    + " by boarding. Treasury +"
+                    + str(reward)
+                    + ", XP +"
+                    + str(xp_reward)
+                    + "."
+                ),
+                "battle_boarding"
+            )
+
+            await post_captains_log(
+                message.guild,
+                text,
+                "battle"
+            )
+
         await message.reply(
-            "Boarding actions are coming with the next combat expansion.",
+            text,
             mention_author=False
         )
 
         return True
 
-    await message.reply(
-        "Unknown battle command. "
-        "Use `!cutlass battle`.",
-        mention_author=False
-    )
-
-    return True

@@ -35,6 +35,19 @@ async def handle_exploration_command(
         )
         return True
 
+    ship = await get_ship(
+        message.guild.id
+    )
+
+    if int(ship["hull"]) <= 0:
+        await message.reply(
+            "**SHIP DISABLED**\n"
+            "The Living Ship is at **0 hull**. "
+            "Repair the ship before exploring.",
+            mention_author=False
+        )
+        return True
+
     ship_channel = message.guild.get_channel(
         settings.get("channel_id", 0)
     )
@@ -47,18 +60,6 @@ async def handle_exploration_command(
             "Exploration belongs in "
             + ship_channel.mention
             + ".",
-            mention_author=False
-        )
-        return True
-
-    ship = await get_ship(
-        message.guild.id
-    )
-
-    if int(ship["hull"]) <= 0:
-        await message.reply(
-            "**THE SHIP IS DISABLED**\n"
-            "Repair the hull before exploring the seas.",
             mention_author=False
         )
         return True
@@ -132,8 +133,13 @@ async def handle_exploration_command(
 
     if encounter_type == "naval":
 
-        created, battle = await start_naval_battle(
+        ship = await get_ship(
             message.guild.id
+        )
+
+        created, battle = await start_naval_battle(
+            message.guild.id,
+            ship=ship
         )
 
         if created:
@@ -162,9 +168,14 @@ async def handle_exploration_command(
             else "kraken"
         )
 
+        ship = await get_ship(
+            message.guild.id
+        )
+
         created, monster = await start_monster_encounter(
             message.guild.id,
-            monster_key
+            monster_key,
+            ship=ship
         )
 
         if created:

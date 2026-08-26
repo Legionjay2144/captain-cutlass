@@ -3,6 +3,14 @@ import random
 
 import aiosqlite
 
+from cutlass.world.combat_scaling import (
+    scale_encounter_stats,
+    roll_player_damage,
+    ship_can_fight,
+    disabled_ship_message,
+)
+from cutlass.world.locks import get_guild_lock
+
 
 DB_PATH = os.getenv(
     "DATABASE_PATH",
@@ -80,6 +88,10 @@ async def initialize_naval():
         CREATE INDEX IF NOT EXISTS idx_naval_active
         ON naval_battles(guild_id, status, id DESC);
 
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_naval_one_active
+        ON naval_battles(guild_id)
+        WHERE status = 'active';
+
         CREATE TABLE IF NOT EXISTS naval_battle_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             battle_id INTEGER NOT NULL,
@@ -150,73 +162,89 @@ async def add_battle_event(
         await db.close()
 
 
-async def start_naval_battle(guild_id):
+async def start_naval_battle(
+    guild_id,
+    ship=None
+):
+    async with get_guild_lock(guild_id):
 
-    active = await get_active_battle(
-        guild_id
-    )
-
-    if active:
-        return False, active
-
-    enemy = random.choice(
-        ENEMY_SHIPS
-    )
-
-    db = await _db()
-
-    try:
-        cursor = await db.execute("""
-            INSERT INTO naval_battles (
-                guild_id,
-                enemy_name,
-                enemy_captain,
-                enemy_hull,
-                enemy_max_hull,
-                enemy_attack_min,
-                enemy_attack_max,
-                reward_min,
-                reward_max,
-                xp_reward,
-                danger
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            guild_id,
-            enemy["name"],
-            enemy["captain"],
-            enemy["hull"],
-            enemy["hull"],
-            enemy["attack_min"],
-            enemy["attack_max"],
-            enemy["reward_min"],
-            enemy["reward_max"],
-            enemy["xp"],
-            enemy["danger"],
-        ))
-
-        battle_id = cursor.lastrowid
-
-        await db.commit()
-
-    finally:
-        await db.close()
-
-    await add_battle_event(
-        battle_id,
-        guild_id,
-        "start",
-        (
-            enemy["name"]
-            + " commanded by "
-            + enemy["captain"]
-            + " engaged the crew."
+        active = await get_active_battle(
+            guild_id
         )
-    )
 
-    return True, await get_active_battle(
-        guild_id
-    )
+        if active:
+            return False, active
+
+        enemy = random.choice(
+            ENEMY_SHIPS
+        )
+
+        scaled = scale_encounter_stats(
+            ship,
+            base_hp=enemy["hull"],
+            attack_min=enemy["attack_min"],
+            attack_max=enemy["attack_max"],
+            reward_min=enemy["reward_min"],
+            reward_max=enemy["reward_max"],
+            xp_reward=enemy["xp"],
+            danger=enemy["danger"],
+            encounter_type="naval",
+        )
+
+        db = await _db()
+
+        try:
+            cursor = await db.execute("""
+                INSERT INTO naval_battles (
+                    guild_id,
+                    enemy_name,
+                    enemy_captain,
+                    enemy_hull,
+                    enemy_max_hull,
+                    enemy_attack_min,
+                    enemy_attack_max,
+                    reward_min,
+                    reward_max,
+                    xp_reward,
+                    danger
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                guild_id,
+                enemy["name"],
+                enemy["captain"],
+                scaled["max_hp"],
+                scaled["max_hp"],
+                scaled["attack_min"],
+                scaled["attack_max"],
+                scaled["reward_min"],
+                scaled["reward_max"],
+                scaled["xp_reward"],
+                enemy["danger"],
+            ))
+
+            battle_id = cursor.lastrowid
+
+            await db.commit()
+
+        finally:
+            await db.close()
+
+        await add_battle_event(
+            battle_id,
+            guild_id,
+            "start",
+            (
+                enemy["name"]
+                + " commanded by "
+                + enemy["captain"]
+                + " engaged the crew."
+            )
+        )
+
+        return True, await get_active_battle(
+            guild_id
+        )
 
 
 async def format_battle(guild_id):
@@ -248,10 +276,10 @@ async def format_battle(guild_id):
         + str(battle["enemy_max_hull"])
         + "**\n\n"
         "Commands:\n"
-        "`!cutlass battle attack`\n"
-        "`!cutlass battle defend`\n"
-        "`!cutlass battle board`\n"
-        "`!cutlass battle flee`"
+        "`!c attack` — Fire on the enemy\n"
+        "`!c defend` — Brace for incoming fire\n"
+        "`!c board` — Attempt boarding at 35% hull or less\n"
+        "`!c flee` — Attempt to escape"
     )
 
 
@@ -267,9 +295,16 @@ async def attack_enemy(
     if not battle:
         return False, "There is no enemy ship to attack.", None
 
-    player_damage = random.randint(
-        12,
-        28
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
+
+    player_damage = roll_player_damage(
+        ship,
+        "naval"
     )
 
     enemy_hull = max(
@@ -348,6 +383,7 @@ async def attack_enemy(
             "reward": reward,
             "xp": battle["xp_reward"],
             "enemy_damage": 0,
+            "enemy_name": battle["enemy_name"],
         }
 
     await add_battle_event(
@@ -386,8 +422,16 @@ async def attack_enemy(
 
 
 async def defend(
-    guild_id
+    guild_id,
+    ship=None
 ):
+
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
 
     battle = await get_active_battle(
         guild_id
@@ -426,6 +470,254 @@ async def defend(
     ), {
         "enemy_damage": damage,
     }
+
+
+async def board_enemy(
+    guild_id,
+    ship=None
+):
+    """
+    Attempt to capture an enemy vessel.
+
+    Boarding becomes available once the enemy has been
+    reduced to 35% hull or less.
+
+    Success:
+        - enemy vessel is captured
+        - battle ends with status 'boarded'
+        - 125% treasure reward
+        - normal XP reward
+
+    Failure:
+        - battle continues
+        - enemy deals half retaliation damage
+    """
+
+    battle = await get_active_battle(
+        guild_id
+    )
+
+    if not battle:
+        return (
+            False,
+            "There is no enemy ship to board.",
+            None
+        )
+
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
+
+    enemy_hull = int(
+        battle["enemy_hull"]
+    )
+
+    enemy_max_hull = max(
+        1,
+        int(battle["enemy_max_hull"])
+    )
+
+    hull_percent = (
+        enemy_hull
+        / enemy_max_hull
+    )
+
+    # Boarding is only possible once the target has been
+    # sufficiently weakened.
+    if hull_percent > 0.35:
+
+        required_hull = max(
+            1,
+            int(enemy_max_hull * 0.35)
+        )
+
+        return (
+            False,
+            (
+                "**TOO DANGEROUS TO BOARD!**\n"
+                + battle["enemy_name"]
+                + " is still fighting too strongly.\n\n"
+                "Reduce the enemy to **"
+                + str(required_hull)
+                + " hull or less** before boarding."
+            ),
+            None
+        )
+
+    # -----------------------------------------------------
+    # Boarding success chance
+    #
+    # 35% hull = roughly 55%
+    # Near 0% hull = roughly 75%
+    # -----------------------------------------------------
+
+    weakness_bonus = int(
+        (
+            (0.35 - hull_percent)
+            / 0.35
+        )
+        * 20
+    )
+
+    success_chance = (
+        55
+        + weakness_bonus
+    )
+
+    danger = str(
+        battle["danger"] or ""
+    ).strip().casefold()
+
+    if danger == "high":
+        success_chance -= 5
+
+    elif danger == "extreme":
+        success_chance -= 10
+
+    success_chance = max(
+        25,
+        min(
+            85,
+            success_chance
+        )
+    )
+
+    roll = random.randint(
+        1,
+        100
+    )
+
+    # -----------------------------------------------------
+    # FAILED BOARDING
+    # -----------------------------------------------------
+
+    if roll > success_chance:
+
+        raw_damage = random.randint(
+            int(battle["enemy_attack_min"]),
+            int(battle["enemy_attack_max"])
+        )
+
+        enemy_damage = max(
+            1,
+            raw_damage // 2
+        )
+
+        await add_battle_event(
+            battle["id"],
+            guild_id,
+            "board_failed",
+            (
+                "The crew attempted to board "
+                + battle["enemy_name"]
+                + " but was repelled. "
+                "The enemy dealt "
+                + str(enemy_damage)
+                + " damage during the retreat."
+            )
+        )
+
+        return (
+            True,
+            (
+                "**BOARDING REPULSED!**\n"
+                "The crew swings across to **"
+                + battle["enemy_name"]
+                + "**, but the enemy drives them back.\n\n"
+                "Retreating under fire causes **"
+                + str(enemy_damage)
+                + " damage**."
+            ),
+            {
+                "victory": False,
+                "boarded": False,
+                "reward": 0,
+                "xp": 0,
+                "enemy_damage": enemy_damage,
+                "success_chance": success_chance,
+            }
+        )
+
+    # -----------------------------------------------------
+    # SUCCESSFUL BOARDING
+    # -----------------------------------------------------
+
+    base_reward = random.randint(
+        int(battle["reward_min"]),
+        int(battle["reward_max"])
+    )
+
+    reward = max(
+        1,
+        int(round(base_reward * 1.25))
+    )
+
+    xp_reward = int(
+        battle["xp_reward"]
+    )
+
+    db = await _db()
+
+    try:
+
+        await db.execute("""
+            UPDATE naval_battles
+            SET status = 'boarded',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            battle["id"],
+        ))
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    await add_battle_event(
+        battle["id"],
+        guild_id,
+        "board",
+        (
+            "The crew successfully boarded and captured "
+            + battle["enemy_name"]
+            + ". Reward "
+            + str(reward)
+            + " doubloons and "
+            + str(xp_reward)
+            + " XP."
+        )
+    )
+
+    return (
+        True,
+        (
+            "**ENEMY VESSEL CAPTURED!**\n"
+            "The crew storms aboard **"
+            + battle["enemy_name"]
+            + "** and overwhelms her defenders.\n\n"
+            "**BOARDING VICTORY**\n"
+            "Captured treasure: **"
+            + str(reward)
+            + " doubloons**\n"
+            "Ship XP: **"
+            + str(xp_reward)
+            + "**"
+        ),
+        {
+            "victory": True,
+            "boarded": True,
+            "reward": reward,
+            "xp": xp_reward,
+            "enemy_damage": 0,
+            "success_chance": success_chance,
+            "enemy_name": battle["enemy_name"],
+        }
+    )
+
 
 
 async def flee_battle(guild_id):

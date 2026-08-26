@@ -62,42 +62,324 @@ async def column_exists(
 def normalize_memory(
     memory
 ):
+    """
+    Convert memories, jokes, and events into a stable
+    comparison form.
 
-    value = memory.lower().strip()
+    The goal is NOT to rewrite stored text. This is used
+    only for duplicate detection.
+    """
+
+    value = str(
+        memory or ""
+    ).lower().strip()
+
+    # -----------------------------------------------------
+    # Phrase normalization
+    # -----------------------------------------------------
 
     replacements = {
-        "enjoys ": "likes ",
-        "loves ": "likes ",
-        "really likes ": "likes ",
-        "is fond of ": "likes ",
-        "favorite food is ": "likes ",
-        "favourite food is ": "likes "
+        "really likes": "likes",
+        "really loves": "likes",
+        "is fond of": "likes",
+        "enjoys": "likes",
+        "loves": "likes",
+        "favourite": "favorite",
+
+        "terrible": "bad",
+        "awful": "bad",
+        "horrible": "bad",
+
+        "jokes": "joke",
+        "puns": "pun",
+
+        "threatened a mutiny": "mutiny",
+        "threatening mutiny": "mutiny",
+        "called for a mutiny": "mutiny",
+        "called for mutiny": "mutiny",
+
+        "called for a punbattle": "punbattle",
+        "called for punbattle": "punbattle",
+
+        "took a midnight nap": "midnight nap",
+        "had a midnight nap": "midnight nap",
     }
 
     for old, new in replacements.items():
+        value = value.replace(
+            old,
+            new
+        )
 
-        if value.startswith(old):
-
-            value = (
-                new
-                + value[len(old):]
-            )
-
-            break
-
+    # Remove punctuation.
     value = re.sub(
         r"[^a-z0-9 ]+",
-        "",
-        value
-    )
-
-    value = re.sub(
-        r"\s+",
         " ",
         value
     )
 
-    return value.strip()
+    # -----------------------------------------------------
+    # Remove low-information filler words
+    # -----------------------------------------------------
+
+    stop_words = {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "for",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "with",
+        "while",
+        "that",
+        "this",
+        "those",
+        "these",
+        "was",
+        "were",
+        "is",
+        "are",
+        "be",
+        "been",
+        "being",
+        "once",
+        "just",
+        "really",
+        "still",
+        "some",
+        "more",
+        "very",
+        "his",
+        "her",
+        "their",
+        "they",
+        "he",
+        "she",
+        "it",
+        "me",
+        "my",
+        "our",
+        "your",
+        "you",
+        "yer",
+        "ye",
+        "keeps",
+        "keep",
+        "known",
+        "got",
+        "has",
+        "had",
+        "have",
+        "did",
+        "does",
+        "do",
+        "off",
+        "even",
+    }
+
+    words = []
+
+    for word in value.split():
+
+        if word in stop_words:
+            continue
+
+        # Tiny bit of safe plural normalization.
+        if (
+            len(word) > 4
+            and word.endswith("s")
+            and not word.endswith("ss")
+        ):
+            word = word[:-1]
+
+        words.append(
+            word
+        )
+
+    return " ".join(
+        words
+    ).strip()
+
+
+def memory_similarity(
+    first,
+    second
+):
+    """
+    Compare two pieces of stored context using normalized
+    meaningful vocabulary.
+
+    Returns 0.0 to 1.0.
+    """
+
+    first_norm = normalize_memory(
+        first
+    )
+
+    second_norm = normalize_memory(
+        second
+    )
+
+    if not first_norm or not second_norm:
+        return 0.0
+
+    if first_norm == second_norm:
+        return 1.0
+
+    first_words = set(
+        first_norm.split()
+    )
+
+    second_words = set(
+        second_norm.split()
+    )
+
+    if not first_words or not second_words:
+        return 0.0
+
+    shared = (
+        first_words
+        & second_words
+    )
+
+    dice_score = (
+        2.0
+        * len(shared)
+        / (
+            len(first_words)
+            + len(second_words)
+        )
+    )
+
+    # If the smaller concept is almost entirely contained
+    # within the longer one, treat that as strong evidence
+    # of a paraphrased duplicate.
+    smaller = min(
+        len(first_words),
+        len(second_words)
+    )
+
+    containment = (
+        len(shared) / smaller
+        if smaller
+        else 0.0
+    )
+
+    if containment >= 0.85:
+        return max(
+            dice_score,
+            0.82
+        )
+
+    return dice_score
+
+
+def is_near_duplicate(
+    first,
+    second,
+    threshold=0.72
+):
+    return (
+        memory_similarity(
+            first,
+            second
+        )
+        >= threshold
+    )
+
+
+def memory_numbers(
+    value
+):
+    """
+    Extract explicit numeric facts from stored context.
+
+    Used to prevent facts such as familiarity 25/100 and
+    familiarity 50/100 from being collapsed together merely
+    because their surrounding wording is similar.
+    """
+
+    return {
+        int(number)
+        for number in re.findall(
+            r"\\b\\d+\\b",
+            str(value or "")
+        )
+    }
+
+
+def has_conflicting_numbers(
+    first,
+    second
+):
+    first_numbers = memory_numbers(
+        first
+    )
+
+    second_numbers = memory_numbers(
+        second
+    )
+
+    return bool(
+        first_numbers
+        and second_numbers
+        and first_numbers != second_numbers
+    )
+
+
+def is_safe_duplicate(
+    first,
+    second,
+    threshold=0.90
+):
+    """
+    Conservative duplicate detection for durable memory.
+
+    Exact normalized matches are duplicates.
+
+    Near-matches are accepted only at a high threshold and
+    only when explicit numeric facts do not disagree.
+    """
+
+    first_normalized = normalize_memory(
+        first
+    )
+
+    second_normalized = normalize_memory(
+        second
+    )
+
+    if (
+        not first_normalized
+        or not second_normalized
+    ):
+        return False
+
+    if (
+        first_normalized
+        == second_normalized
+    ):
+        return True
+
+    if has_conflicting_numbers(
+        first,
+        second
+    ):
+        return False
+
+    return (
+        memory_similarity(
+            first,
+            second
+        )
+        >= float(threshold)
+    )
 
 
 async def initialize_database():
@@ -625,10 +907,13 @@ async def add_user_memory(
 
     for row in rows:
 
-        if normalize_memory(
-            row[1]
-        ) == key:
+        existing_memory = row[1]
 
+        if is_safe_duplicate(
+            existing_memory,
+            memory,
+            threshold=0.90
+        ):
             existing_id = row[0]
             break
 
@@ -764,8 +1049,54 @@ async def add_captain_lore(
     category="personal",
     importance=5
 ):
+    # -----------------------------------------------------
+    # Living Ship identity guard
+    #
+    # IMPORTANT:
+    # Check the ORIGINAL text before normalize_memory().
+    # Normalization removes words such as "our", which can
+    # otherwise hide statements like:
+    #
+    #   "Our ship is The Old Salt."
+    #
+    # Current Living Ship identity belongs exclusively to
+    # live Ship World state.
+    # -----------------------------------------------------
+
+    raw_lore = str(
+        lore or ""
+    ).strip()
+
+    if not raw_lore:
+        return False
+
+    lore_lower = raw_lore.lower()
+
+    current_ship_claims = (
+        "current ship",
+        "current vessel",
+        "living ship",
+        "our ship is",
+        "our vessel is",
+        "the crew's ship is",
+        "the crews ship is",
+        "captain's current ship",
+        "captains current ship",
+        "captain cutlass's current ship",
+        "captain cutlass current ship",
+        "our current ship",
+        "our current vessel",
+    )
+
+    if any(
+        phrase in lore_lower
+        for phrase in current_ship_claims
+    ):
+        return False
+
+    # Only normalize AFTER authority checks.
     lore = normalize_memory(
-        lore
+        raw_lore
     )
 
     if not lore:
@@ -1174,6 +1505,64 @@ async def increase_familiarity(
     return old_value, new_value
 
 
+async def nickname_is_taken(
+    guild_id,
+    nickname,
+    exclude_user_id=None
+):
+    """
+    Return True when another member in the same guild
+    already owns this relationship nickname.
+
+    Comparison is case-insensitive and ignores surrounding
+    whitespace.
+    """
+
+    nickname = str(
+        nickname or ""
+    ).strip()
+
+    if not nickname:
+        return False
+
+    db = await get_db()
+
+    if exclude_user_id is None:
+
+        cursor = await db.execute("""
+            SELECT 1
+            FROM relationships
+            WHERE guild_id = ?
+              AND TRIM(LOWER(COALESCE(nickname, '')))
+                  = TRIM(LOWER(?))
+            LIMIT 1
+        """, (
+            guild_id,
+            nickname,
+        ))
+
+    else:
+
+        cursor = await db.execute("""
+            SELECT 1
+            FROM relationships
+            WHERE guild_id = ?
+              AND user_id != ?
+              AND TRIM(LOWER(COALESCE(nickname, '')))
+                  = TRIM(LOWER(?))
+            LIMIT 1
+        """, (
+            guild_id,
+            exclude_user_id,
+            nickname,
+        ))
+
+    row = await cursor.fetchone()
+
+    return row is not None
+
+
+
 async def update_relationship(
     guild_id,
     user_id,
@@ -1270,20 +1659,29 @@ async def add_running_joke(
     db = await get_db()
 
     cursor = await db.execute("""
-        SELECT id
+        SELECT id, joke
         FROM running_jokes
         WHERE guild_id = ?
         AND user_id = ?
-        AND LOWER(joke) = LOWER(?)
-        LIMIT 1
+        ORDER BY id DESC
+        LIMIT 30
     """, (
         guild_id,
-        user_id,
-        joke
+        user_id
     ))
 
-    if await cursor.fetchone():
-        return False
+    rows = await cursor.fetchall()
+
+    for row in rows:
+
+        existing_joke = row[1]
+
+        if is_safe_duplicate(
+            existing_joke,
+            joke,
+            threshold=0.90
+        ):
+            return False
 
     async with _write_lock:
 
@@ -1367,6 +1765,31 @@ async def add_relationship_event(
 
     db = await get_db()
 
+    cursor = await db.execute("""
+        SELECT id, event
+        FROM relationship_events
+        WHERE guild_id = ?
+        AND user_id = ?
+        ORDER BY id DESC
+        LIMIT 40
+    """, (
+        guild_id,
+        user_id
+    ))
+
+    rows = await cursor.fetchall()
+
+    for row in rows:
+
+        existing_event = row[1]
+
+        if is_safe_duplicate(
+            existing_event,
+            event,
+            threshold=0.90
+        ):
+            return False
+
     async with _write_lock:
 
         await db.execute("""
@@ -1404,6 +1827,8 @@ async def add_relationship_event(
         ))
 
         await db.commit()
+
+    return True
 
 
 async def get_relationship_events(

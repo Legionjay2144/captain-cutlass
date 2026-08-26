@@ -1,4 +1,5 @@
 import random
+from datetime import datetime, timezone
 
 
 async def handle_island_command(
@@ -17,6 +18,8 @@ async def handle_island_command(
     start_monster_encounter,
     start_boss,
     get_active_boss,
+    get_island_activity_state,
+    record_island_visit,
     post_captains_log
 ):
 
@@ -103,6 +106,81 @@ async def handle_island_command(
 
     if command == "!cutlass island explore":
 
+        # -------------------------------------------------
+        # Physical island exploration cooldown
+        # -------------------------------------------------
+
+        location_key = (
+            str(location)
+            .lower()
+            .replace("'", "")
+            .replace("’", "")
+            .replace("-", "_")
+            .replace(" ", "_")
+        )
+
+        state = await get_island_activity_state(
+            message.guild.id,
+            location_key
+        )
+
+        last_explored = state.get(
+            "last_explored_at"
+        )
+
+        if last_explored:
+
+            try:
+                last_time = datetime.fromisoformat(
+                    str(last_explored)
+                )
+
+                if last_time.tzinfo is None:
+                    last_time = last_time.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                now = datetime.now(
+                    timezone.utc
+                )
+
+                elapsed = (
+                    now - last_time
+                ).total_seconds()
+
+                cooldown = 30 * 60
+
+                if elapsed < cooldown:
+
+                    remaining = int(
+                        cooldown - elapsed
+                    )
+
+                    minutes = max(
+                        1,
+                        (remaining + 59) // 60
+                    )
+
+                    await message.reply(
+                        "**ISLAND EXPLORATION COOLDOWN**\n"
+                        "The crew has already searched this island recently.\n"
+                        "Try again in about **"
+                        + str(minutes)
+                        + " minute"
+                        + (
+                            ""
+                            if minutes == 1
+                            else "s"
+                        )
+                        + "**.",
+                        mention_author=False
+                    )
+
+                    return True
+
+            except (TypeError, ValueError):
+                pass
+
         activity = choose_island_activity(
             location
         )
@@ -114,6 +192,11 @@ async def handle_island_command(
             )
             return True
 
+        visit_number = await record_island_visit(
+            message.guild.id,
+            location_key
+        )
+
         text = (
             "**"
             + activity["title"].upper()
@@ -123,12 +206,60 @@ async def handle_island_command(
 
         kind = activity["type"]
 
+        # -------------------------------------------------
+        # Revisit progression
+        # -------------------------------------------------
+
+        if visit_number == 1:
+            text += (
+                "\n\n**First Expedition**\n"
+                "The crew begins properly charting this island."
+            )
+
+        elif visit_number >= 5:
+            text += (
+                "\n\n**Seasoned Explorers**\n"
+                "This is expedition **#"
+                + str(visit_number)
+                + "** to "
+                + location
+                + ". The crew knows these shores well."
+            )
+
+        else:
+            text += (
+                "\n\nIsland expedition **#"
+                + str(visit_number)
+                + "**."
+            )
+
+        rare_revisit = (
+            visit_number >= 3
+            and random.randint(1, 100) <= 15
+        )
+
         if kind == "treasure":
 
             reward = random.randint(
                 activity["reward_min"],
                 activity["reward_max"]
             )
+
+            if rare_revisit:
+                bonus = max(
+                    10,
+                    int(round(reward * 0.20))
+                )
+
+                reward += bonus
+
+                text += (
+                    "\n\n**FAMILIAR GROUND BONUS**\n"
+                    "The crew remembers an overlooked hiding place. "
+                    "Treasure value **+"
+                    + str(bonus)
+                    + " doubloons**."
+                )
 
             ship_after = await add_ship_treasury(
                 message.guild.id,
@@ -162,6 +293,22 @@ async def handle_island_command(
                 activity["amount_min"],
                 activity["amount_max"]
             )
+
+            if rare_revisit:
+                bonus = max(
+                    3,
+                    int(round(amount * 0.20))
+                )
+
+                amount += bonus
+
+                text += (
+                    "\n\n**FAMILIAR GROUND BONUS**\n"
+                    "The crew remembers where useful provisions "
+                    "were overlooked. Supplies found **+"
+                    + str(bonus)
+                    + "**."
+                )
 
             before = int(
                 ship["supplies"]
@@ -201,9 +348,14 @@ async def handle_island_command(
 
         elif kind == "monster":
 
+            ship = await get_ship(
+                message.guild.id
+            )
+
             created, monster = await start_monster_encounter(
                 message.guild.id,
-                activity["monster"]
+                activity["monster"],
+                ship=ship
             )
 
             if created:
@@ -227,9 +379,14 @@ async def handle_island_command(
                 )
 
             else:
+                ship = await get_ship(
+                    message.guild.id
+                )
+
                 created, boss = await start_boss(
                     message.guild.id,
-                    activity["boss"]
+                    activity["boss"],
+                    ship=ship
                 )
 
                 if created:
@@ -259,6 +416,13 @@ async def handle_island_command(
                     )
 
         elif kind == "lore":
+
+            if rare_revisit:
+                text += (
+                    "\n\n**HIDDEN DETAIL UNCOVERED**\n"
+                    "Familiarity with the island reveals something "
+                    "the crew missed on earlier expeditions."
+                )
 
             await add_ship_history(
                 message.guild.id,

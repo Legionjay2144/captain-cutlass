@@ -28,6 +28,7 @@ from cutlass.world.islands import (
 from cutlass.commands.battle import handle_battle_command
 from cutlass.commands.monsters import handle_monster_command
 from cutlass.commands.bosses import handle_boss_command
+from cutlass.commands.combat import handle_combat_command
 from cutlass.world.bosses import (
     initialize_bosses,
     get_active_boss,
@@ -49,6 +50,7 @@ from cutlass.world.naval import (
     format_battle,
     attack_enemy,
     defend,
+    board_enemy,
     flee_battle,
     get_active_battle,
 )
@@ -59,6 +61,8 @@ from cutlass.world.pirate_world import (
     format_discoveries,
     get_world_history,
     explore_random_island,
+    get_island_activity_state,
+    record_island_visit,
 )
 
 from discord.ext import tasks
@@ -86,11 +90,11 @@ from social_features import (
 
 from ship_world import (
     initialize_ship_world, ensure_ship, get_ship, get_ship_settings, set_ship_setting,
-    format_ship_status, rename_ship, get_history, donate, top_contributors,
+    format_ship_status, rename_ship, get_history, get_history_records, get_completed_voyages, donate, top_contributors,
     repair_ship, format_upgrades, buy_upgrade, format_destinations,
     start_voyage, get_active_voyage, resolve_due_voyages,
     discord_timestamp,
-    damage_ship, reward_ship, combat_ship_status,
+    damage_ship, reward_ship, _reward_ship_unlocked, combat_ship_status,
     add_ship_treasury, add_ship_supplies,
     add_history as add_ship_history
 )
@@ -193,7 +197,8 @@ from memory import (
     add_log_entry,
     get_log_entries,
     save_chronicle,
-    get_latest_chronicle
+    get_latest_chronicle,
+    nickname_is_taken,
 )
 
 
@@ -449,6 +454,22 @@ BRAIN_SCHEMA = {
 
         "lore": {
             "type": "string"
+        },
+
+        "memory_evidence": {
+            "type": "string"
+        },
+
+        "joke_evidence": {
+            "type": "string"
+        },
+
+        "event_evidence": {
+            "type": "string"
+        },
+
+        "server_lore_evidence": {
+            "type": "string"
         }
     },
 
@@ -462,7 +483,11 @@ BRAIN_SCHEMA = {
         "event",
         "server_lore",
         "reply",
-        "lore"
+        "lore",
+        "memory_evidence",
+        "joke_evidence",
+        "event_evidence",
+        "server_lore_evidence"
     ],
 
     "additionalProperties": False
@@ -1227,6 +1252,555 @@ async def build_target_member_context(message):
     return "\n".join(lines)
 
 
+async def build_gameplay_context(
+    message
+):
+    """
+    Selectively load authoritative gameplay state.
+
+    No additional AI call is made here.
+    """
+
+    content = (
+        message.content
+        .lower()
+        .strip()
+    )
+
+    ship_terms = (
+        "ship",
+        "living ship",
+        "hull",
+        "sails",
+        "supplies",
+        "morale",
+        "treasury",
+        "doubloons",
+        "repair",
+        "fix the ship",
+        "fix our ship",
+        "upgrade",
+        "upgrades",
+    )
+
+    voyage_terms = (
+        "voyage",
+        "voyages",
+        "sail",
+        "sailed",
+        "sailing",
+        "destination",
+        "destinations",
+        "travel",
+        "route",
+        "where are we",
+        "where is the ship",
+    )
+
+    exploration_terms = (
+        "explore",
+        "exploration",
+        "scout",
+        "scouting",
+        "island",
+        "islands",
+        "discovered",
+        "discovery",
+        "charted",
+        "world",
+    )
+
+    combat_terms = (
+        "battle",
+        "fight",
+        "combat",
+        "boss",
+        "monster",
+        "kraken",
+        "naval",
+        "enemy",
+        "attack",
+        "board",
+        "boarding",
+        "defend",
+        "flee",
+        "damage",
+    )
+
+    history_terms = (
+        "history",
+        "happened",
+        "last voyage",
+        "last battle",
+        "last fight",
+        "recent",
+        "recently",
+        "adventure",
+        "adventures",
+        "story",
+        "stories",
+        "remember when",
+        "what have we",
+        "what did we",
+    )
+
+    followup_terms = (
+        "before that",
+        "one before",
+        "what about that",
+        "what about the one",
+        "and before",
+        "then what",
+        "what happened next",
+        "after that",
+        "that one",
+    )
+
+    all_terms = (
+        ship_terms
+        + voyage_terms
+        + exploration_terms
+        + combat_terms
+        + history_terms
+    )
+
+    gameplay_detected = any(
+        term in content
+        for term in all_terms
+    )
+
+    followup_detected = any(
+        term in content
+        for term in followup_terms
+    )
+
+    # -----------------------------------------------------
+    # Follow-up continuity
+    #
+    # "What about the one before that?" contains no obvious
+    # gameplay noun, so inspect recent chat before deciding.
+    # -----------------------------------------------------
+
+    if (
+        not gameplay_detected
+        and followup_detected
+    ):
+
+        recent = await get_recent_messages(
+            message.guild.id,
+            message.channel.id,
+            6
+        )
+
+        recent_text = " ".join(
+            str(row[1]).lower()
+            for row in recent
+        )
+
+        gameplay_detected = any(
+            term in recent_text
+            for term in all_terms
+        )
+
+    if not gameplay_detected:
+        return "NONE"
+
+    guild_id = message.guild.id
+
+    wants_history = (
+        any(
+            term in content
+            for term in history_terms
+        )
+        or followup_detected
+    )
+
+    wants_voyage = (
+        any(
+            term in content
+            for term in voyage_terms
+        )
+        or "last voyage" in content
+        or followup_detected
+    )
+
+    wants_world = any(
+        term in content
+        for term in exploration_terms
+    )
+
+    wants_story = any(
+        term in content
+        for term in (
+            "story",
+            "stories",
+            "adventure",
+            "adventures",
+        )
+    )
+
+    ship = await get_ship(
+        guild_id
+    )
+
+    lines = [
+        "AUTHORITATIVE GAMEPLAY CONTEXT:",
+        "",
+        "CURRENT LIVING SHIP:",
+        "Name: " + str(ship["name"]),
+        "Level: " + str(ship["level"]),
+        "XP: " + str(ship["xp"]),
+        "Hull: " + str(ship["hull"]),
+        "Sails: " + str(ship["sails"]),
+        "Supplies: " + str(ship["supplies"]),
+        "Morale: " + str(ship["morale"]),
+        "Treasury: " + str(ship["treasury"]),
+        "Location: " + str(ship["location"]),
+        (
+            "Voyages Completed: "
+            + str(ship["voyages_completed"])
+        ),
+        (
+            "Distance Sailed: "
+            + str(ship["distance_sailed"])
+            + " nautical miles"
+        ),
+    ]
+
+    if wants_voyage:
+
+        voyage = await get_active_voyage(
+            guild_id
+        )
+
+        lines.extend([
+            "",
+            "ACTIVE VOYAGE:",
+        ])
+
+        if voyage:
+
+            lines.extend([
+                "Destination: " + str(voyage["destination"]),
+                "Risk: " + str(voyage["risk"]),
+                "Started: " + str(voyage["started_at"]),
+                (
+                    "Expected Completion: "
+                    + str(voyage["completes_at"])
+                ),
+                (
+                    "Distance: "
+                    + str(voyage["distance"])
+                    + " nautical miles"
+                ),
+            ])
+
+        else:
+            lines.append(
+                "No active voyage."
+            )
+
+    records = []
+
+    if wants_history:
+
+        records = await get_history_records(
+            guild_id,
+            limit=20
+        )
+
+        completed_voyages = await get_completed_voyages(
+            guild_id,
+            limit=8
+        )
+
+        lines.extend([
+            "",
+            "COMPLETED VOYAGE HISTORY:",
+            (
+                "Voyages below are ordered newest first. "
+                "VOYAGE #1 is the most recently completed voyage. "
+                "VOYAGE #2 is the voyage immediately before it."
+            ),
+        ])
+
+        if completed_voyages:
+
+            for number, voyage_record in enumerate(
+                completed_voyages,
+                start=1
+            ):
+
+                lines.extend([
+                    "",
+                    (
+                        "VOYAGE #"
+                        + str(number)
+                        + ":"
+                    ),
+                    (
+                        "Completed: "
+                        + str(
+                            voyage_record["created_at"]
+                        )
+                    ),
+                    (
+                        "Result: "
+                        + str(
+                            voyage_record["content"]
+                        )
+                    ),
+                ])
+
+        else:
+
+            lines.append(
+                "No completed voyages recorded."
+            )
+
+        lines.extend([
+            "",
+            "RECENT RECORDED SHIP EVENTS:",
+            (
+                "These events are NOT automatically voyages. "
+                "Battles, exploration, repairs, monsters, "
+                "island activity, and treasure events must not "
+                "be described as completed voyages unless a "
+                "VOYAGE entry above says so."
+            ),
+        ])
+
+        for row in records[:10]:
+            lines.append(
+                "- ["
+                + str(row["event_type"])
+                + "] "
+                + str(row["created_at"])
+                + ": "
+                + str(row["content"])[:500]
+            )
+
+        if not records:
+            lines.append(
+                "- No recorded ship events."
+            )
+
+    # -----------------------------------------------------
+    # Explicit latest-voyage grounding
+    # -----------------------------------------------------
+
+    if (
+        "last voyage" in content
+        or "latest voyage" in content
+        or (
+            followup_detected
+            and records
+        )
+    ):
+
+        if not records:
+
+            records = await get_history_records(
+                guild_id,
+                limit=30
+            )
+
+        voyage_records = [
+            row
+            for row in records
+            if row["event_type"]
+            == "voyage_complete"
+        ]
+
+        lines.extend([
+            "",
+            "RECORDED COMPLETED VOYAGES, NEWEST FIRST:",
+        ])
+
+        if voyage_records:
+
+            for number, row in enumerate(
+                voyage_records[:5],
+                start=1
+            ):
+                lines.append(
+                    str(number)
+                    + ". "
+                    + str(row["created_at"])
+                    + ": "
+                    + str(row["content"])[:600]
+                )
+
+        else:
+            lines.append(
+                "- No completed voyage records found."
+            )
+
+        lines.append(
+            (
+                "If the member asks for the last voyage, use item 1. "
+                "If they follow with 'the one before that', use item 2."
+            )
+        )
+
+    if (
+        wants_world
+        or wants_story
+    ):
+
+        world_history = await get_world_history(
+            guild_id,
+            limit=10
+        )
+
+        lines.extend([
+            "",
+            "RECENT RECORDED WORLD EVENTS:",
+        ])
+
+        if world_history:
+
+            for row in world_history:
+                lines.append(
+                    "- ["
+                    + str(row["event_type"])
+                    + "] "
+                    + str(row["created_at"])
+                    + ": "
+                    + str(row["content"])[:500]
+                )
+
+        else:
+            lines.append(
+                "- No recorded world events."
+            )
+
+    # -----------------------------------------------------
+    # Natural gameplay command hints
+    # -----------------------------------------------------
+
+    command_hint = None
+
+    if (
+        "repair" in content
+        or "fix the ship" in content
+        or "fix our ship" in content
+    ):
+        command_hint = (
+            "`!c repair` — repair the Living Ship."
+        )
+
+    elif (
+        "where can we sail" in content
+        or "destination" in content
+        or "where can we go" in content
+    ):
+        command_hint = (
+            "`!c destinations` — view charted voyage routes."
+        )
+
+    elif (
+        "how do i sail" in content
+        or "start a voyage" in content
+    ):
+        command_hint = (
+            "`!c destinations` to view routes, then "
+            "`!c voyage <number>` to set sail."
+        )
+
+    elif (
+        "how do i explore an island" in content
+        or "island explore" in content
+    ):
+        command_hint = (
+            "`!c island explore` — explore the island "
+            "where the ship is physically anchored."
+        )
+
+    elif (
+        "explore" in content
+        or "scout" in content
+    ):
+        command_hint = (
+            "`!c explore` — scout the seas for discoveries."
+        )
+
+    elif (
+        "board" in content
+        or "boarding" in content
+    ):
+        command_hint = (
+            "`!c board` — attempt to board a weakened enemy vessel."
+        )
+
+    elif "upgrade" in content:
+        command_hint = (
+            "`!c upgrades` — view Living Ship upgrades."
+        )
+
+    elif "ship status" in content:
+        command_hint = (
+            "`!c ship` — view full Living Ship status."
+        )
+
+    if command_hint:
+
+        lines.extend([
+            "",
+            "RELEVANT GAMEPLAY COMMAND:",
+            command_hint,
+            (
+                "Include this command naturally if answering "
+                "a gameplay-help question."
+            ),
+        ])
+
+    if wants_story:
+
+        lines.extend([
+            "",
+            "RECORDED STORY RULE:",
+            (
+                "The member asked for a story about this crew's "
+                "adventures. Weave 2-4 RECORDED events above into "
+                "a short pirate tale."
+            ),
+            (
+                "Dramatic wording is welcome, but do not invent "
+                "additional victories, enemies, rewards, voyages, "
+                "or discoveries."
+            ),
+        ])
+
+    lines.extend([
+        "",
+        "GROUNDING RULES:",
+        (
+            "- CURRENT LIVING SHIP and recorded gameplay events "
+            "are factual."
+        ),
+        (
+            "- Never invent a guild voyage, battle, discovery, "
+            "reward, ship condition, or gameplay event."
+        ),
+        (
+            "- Captain's fictional personal history is separate "
+            "from this guild's recorded adventures."
+        ),
+        (
+            "- Use event_type to distinguish voyages, battles, "
+            "bosses, monsters, exploration, repairs and upgrades."
+        ),
+        (
+            "- For conversational follow-ups, preserve the subject "
+            "established by recent chat."
+        ),
+    ])
+
+    return "\n".join(
+        lines
+    )
+
 async def build_world_context(
     guild_id
 ):
@@ -1721,6 +2295,102 @@ async def resolve_authoritative_question(
         for row in canon_rows
     }
 
+    # -----------------------------------------------------
+    # Authoritative completed voyage history
+    # -----------------------------------------------------
+
+    last_voyage_patterns = (
+        "last voyage",
+        "latest voyage",
+        "most recent voyage",
+        "previous voyage",
+        "what happened on our last voyage",
+        "what happened during our last voyage",
+    )
+
+    if any(
+        phrase in content
+        for phrase in last_voyage_patterns
+    ):
+
+        voyages = await get_completed_voyages(
+            message.guild.id,
+            limit=2
+        )
+
+        if not voyages:
+            return (
+                "I don't have a completed voyage recorded yet, matey."
+            )
+
+        voyage = voyages[0]
+
+        return (
+            "Our latest recorded voyage: "
+            + str(voyage["content"])
+        )
+
+
+    # -----------------------------------------------------
+    # Conversational voyage follow-up
+    #
+    # "What about the one before that?" should resolve to
+    # voyage #2 when recent conversation was about voyages.
+    # -----------------------------------------------------
+
+    voyage_followup_patterns = (
+        "one before that",
+        "the one before that",
+        "what about the one before that",
+        "voyage before that",
+        "before that one",
+    )
+
+    if any(
+        phrase in content
+        for phrase in voyage_followup_patterns
+    ):
+
+        recent = await get_recent_messages(
+            message.guild.id,
+            message.channel.id,
+            8
+        )
+
+        recent_text = " ".join(
+            str(row[1]).lower()
+            for row in recent
+        )
+
+        voyage_context = (
+            "last voyage" in recent_text
+            or "latest voyage" in recent_text
+            or "recorded voyage" in recent_text
+            or "voyage before" in recent_text
+        )
+
+        if voyage_context:
+
+            voyages = await get_completed_voyages(
+                message.guild.id,
+                limit=3
+            )
+
+            if len(voyages) >= 2:
+
+                voyage = voyages[1]
+
+                return (
+                    "The voyage before that: "
+                    + str(voyage["content"])
+                )
+
+            return (
+                "I don't have an older completed voyage "
+                "recorded before that one, matey."
+            )
+
+
     # Current Living Ship.
     current_ship_patterns = (
         "current ship",
@@ -1833,6 +2503,7 @@ async def analyze_message(
     member_context,
     target_context,
     world_context,
+    gameplay_context,
     humor_mode,
     direct_question_mode,
     captain_mood="neutral",
@@ -1846,6 +2517,153 @@ async def analyze_message(
     current_ship = await get_ship(
         message.guild.id
     )
+
+    # -----------------------------------------------------
+    # Dedicated recorded-adventure storytelling
+    #
+    # Natural requests for stories about THIS CREW use real
+    # ship-history events only. The AI may dramatize wording,
+    # but it may not invent gameplay facts.
+    # -----------------------------------------------------
+
+    content_lower = (
+        message.content
+        .lower()
+        .strip()
+    )
+
+    recorded_story_request = (
+        (
+            "story" in content_lower
+            or "tale" in content_lower
+            or "yarn" in content_lower
+        )
+        and any(
+            phrase in content_lower
+            for phrase in (
+                "our recent",
+                "our adventure",
+                "our adventures",
+                "our crew",
+                "we've done",
+                "we have done",
+                "recent adventure",
+                "recent adventures",
+            )
+        )
+    )
+
+    if recorded_story_request:
+
+        records = await get_history_records(
+            message.guild.id,
+            limit=12
+        )
+
+        # Prefer memorable gameplay events over maintenance
+        # noise such as repairs and donations.
+        preferred_types = {
+            "voyage_complete",
+            "battle_victory",
+            "battle_boarding",
+            "monster_victory",
+            "boss_victory",
+            "exploration",
+            "exploration_treasure",
+            "island_treasure",
+            "island_lore",
+            "island_supplies",
+        }
+
+        story_records = [
+            row
+            for row in records
+            if row["event_type"]
+            in preferred_types
+        ][:6]
+
+        if not story_records:
+
+            story_records = records[:5]
+
+        facts = "\n".join(
+            (
+                str(index)
+                + ". ["
+                + str(row["event_type"])
+                + "] "
+                + str(row["content"])
+            )
+            for index, row in enumerate(
+                story_records,
+                start=1
+            )
+        )
+
+        story_prompt = f"""
+You are Captain Cutlass, an eccentric older pirate.
+
+The member asked for a story about this crew's REAL recent adventures.
+
+AUTHORITATIVE RECORDED EVENTS:
+{facts if facts else "NONE"}
+
+TASK:
+Tell a short entertaining pirate story using 3 to 5 of the recorded events above.
+
+STRICT FACT RULES:
+- Every gameplay event in the story must come from AUTHORITATIVE RECORDED EVENTS.
+- Do not invent another enemy, voyage, island, reward, victory, defeat, treasure amount, or discovery.
+- Do not merge unrelated events and claim they happened during the same voyage.
+- You MAY add atmosphere, pirate dialogue, creaking decks, sea spray, old-man complaints, and dramatic transitions.
+- Preserve names and reward amounts when you mention them.
+- Make it sound like Captain Cutlass remembering adventures with his crew.
+- Do not merely say "that was a fine tale."
+- Actually tell the story.
+- About 4 to 8 sentences.
+
+Return ONLY the story.
+"""
+
+        try:
+
+            response = await ai.responses.create(
+                model=OPENAI_MODEL,
+                input=story_prompt,
+                max_output_tokens=350,
+                store=False
+            )
+
+            story_reply = (
+                response.output_text
+                .strip()
+            )
+
+            if story_reply:
+
+                return {
+                    "respond": True,
+                    "memory": None,
+                    "relationship": None,
+                    "opinion": None,
+                    "nickname": None,
+                    "joke": None,
+                    "event": None,
+                    "server_lore": None,
+                    "lore": None,
+                    "reply": story_reply,
+                    "suppress_parrot_banter": True
+                }
+
+        except Exception as error:
+
+            print(
+                "Recorded adventure story error:",
+                repr(error)
+            )
+
+            # Fall through to normal brain if needed.
+
 
     if direct_question_mode:
 
@@ -1937,10 +2755,44 @@ the historical ship appears in Captain's canon.
 ESTABLISHED CAPTAIN / WORLD LORE:
 {world_context}
 
+LIVE GAMEPLAY / SHIP RECORDS:
+{gameplay_context}
+
+RECENT CONVERSATION:
+{conversation}
+
+FOLLOW-UP RULE:
+If the current question says things such as "that one",
+"the one before that", "what about that", "then what",
+or otherwise depends on prior context, resolve the referent
+from RECENT CONVERSATION and LIVE GAMEPLAY / SHIP RECORDS.
+Do not reinterpret it as unrelated Captain biography.
+
+VOYAGE FOLLOW-UP RULE:
+If the preceding conversation was about a completed voyage,
+phrases such as "the one before that" refer to the next older
+entry in COMPLETED VOYAGE HISTORY.
+
+Example:
+- "last voyage" = VOYAGE #1
+- "one before that" = VOYAGE #2
+- another "one before that" = VOYAGE #3
+
+Never substitute a battle, exploration event, island visit,
+repair, monster encounter, or other recent event for a voyage.
+
 DIRECT QUESTION:
 {message.content[:1200]}
 
 Answer the question directly and in character.
+
+GAMEPLAY ANSWER RULE:
+If LIVE GAMEPLAY / SHIP RECORDS contains a relevant command,
+include that command naturally in the answer.
+
+If the member requests a story about this crew's recent
+adventures, use the recorded gameplay events supplied above.
+Do not substitute generic pirate lore for recorded events.
 
 CANON PRIORITY RULE:
 AUTHORITATIVE CORE CANON is the highest-priority source of truth.
@@ -2126,6 +2978,116 @@ Return ONLY Captain Cutlass's response.
             )
 
             # Fall through to Captain's normal brain if this call fails.
+
+    # Dedicated targeted-joke path.
+    # Resolve the requested member and use ONLY that member's
+    # harmless stored context to build an actual joke.
+    if humor_mode == "TARGETED_JOKE_REQUEST":
+
+        target = await resolve_joke_target(
+            message
+        )
+
+        target_context = await build_target_member_context(
+            message
+        )
+
+        target_name = (
+            target.display_name
+            if target
+            else "the target member"
+        )
+
+        targeted_joke_prompt = f"""
+You are Captain Cutlass, an eccentric 55-year-old pirate.
+
+MESSAGE AUTHOR:
+{message.author.display_name}
+
+TARGET MEMBER:
+{target_name}
+
+TARGET MEMBER CONTEXT:
+{target_context}
+
+REQUEST:
+{message.content[:1200]}
+
+The MESSAGE AUTHOR is asking Captain Cutlass to make a joke,
+playful roast, or witty observation ABOUT TARGET MEMBER.
+
+RULES:
+- Produce an ACTUAL joke about TARGET MEMBER.
+- The punchline must clearly be about TARGET MEMBER.
+- Do NOT act as though TARGET MEMBER told Captain a joke.
+- Do NOT merely compliment TARGET MEMBER.
+- Do NOT merely say TARGET MEMBER is funny.
+- Do NOT tell TARGET MEMBER to "keep 'em coming."
+- Do NOT invent personal facts.
+- Use at most ONE concrete harmless detail from TARGET MEMBER CONTEXT.
+- Prefer a running joke when one is available.
+- Otherwise prefer a nickname, harmless memory, relationship trait,
+  shared event, achievement, or profile detail.
+- If TARGET MEMBER CONTEXT is NONE or contains nothing useful,
+  make a harmless joke based on their name or generic pirate life.
+- Never reveal that stored context, memories, profiles, or database
+  information were consulted.
+- Never expose private-looking information.
+- Keep the joke playful rather than genuinely insulting.
+- Usually 1 or 2 sentences.
+- Give the joke immediately.
+- Avoid generic pirate filler.
+- Do not begin every response with "Arrr."
+- Do not end every response with "Yarrr."
+- Stay naturally in Captain Cutlass's voice.
+
+BAD:
+"Corny, yer jokes might be sinkin', but keep 'em coming!"
+
+BAD:
+"Corny is one funny pirate!"
+
+GOOD:
+"InboundCorn4 tried smuggling corn aboard the Kraken again.
+I told him this is a pirate ship, not a kernel operation."
+
+Return ONLY Captain Cutlass's joke.
+"""
+
+        try:
+
+            response = await ai.responses.create(
+                model=OPENAI_MODEL,
+                input=targeted_joke_prompt,
+                max_output_tokens=140,
+                store=False
+            )
+
+            targeted_joke_reply = (
+                response.output_text.strip()
+            )
+
+            return {
+                "respond": True,
+                "memory": None,
+                "relationship": None,
+                "opinion": None,
+                "nickname": None,
+                "joke": None,
+                "event": None,
+                "server_lore": None,
+                "lore": None,
+                "reply": targeted_joke_reply
+            }
+
+        except Exception as error:
+
+            print(
+                "Dedicated targeted-joke error:",
+                repr(error)
+            )
+
+            # Fall through to the general Captain brain.
 
     if humor_mode == "HUMOR_REQUEST":
 
@@ -2355,6 +3317,37 @@ Mood must NOT:
 WORLD:
 
 {world_context}
+
+LIVE GAMEPLAY / SHIP RECORDS:
+
+{gameplay_context}
+
+GAMEPLAY GROUNDING RULE:
+When LIVE GAMEPLAY / SHIP RECORDS is not NONE, treat it as
+authoritative for current ship status, voyages, exploration,
+combat, discoveries, and recorded gameplay history.
+
+When answering gameplay questions:
+- Prefer recorded facts over invented events.
+- Never invent a voyage, battle, discovery, reward, location,
+  ship condition, or historical event that is not supported
+  by the live gameplay records.
+- A completed voyage exists only when it appears under
+  COMPLETED VOYAGE HISTORY.
+- Do not combine unrelated recent events into a voyage.
+- Battles, island exploration, repairs, treasure finds,
+  monster encounters, and other events remain separate unless
+  the records explicitly connect them to a completed voyage.
+- Use recent recorded events to build stories when appropriate,
+  but do not change what actually happened.
+- Maintain continuity with the recent conversation when a
+  follow-up clearly refers to the same gameplay subject.
+- If the member appears to need gameplay help, answer naturally
+  in Captain Cutlass's voice and mention a useful command when
+  one is relevant.
+- Do not dump commands unnecessarily.
+- Scouting/exploration does not physically move the Living Ship.
+- The ship's Location field represents its actual physical location.
 
 CURRENT LIVING SHIP:
 
@@ -2633,6 +3626,42 @@ LORE:
 When Captain establishes a reusable fictional past event about himself,
 save a short third-person version.
 
+
+PERMANENT MEMORY GROUNDING:
+
+For every proposed permanent write, provide evidence copied from the
+member's actual LATEST message.
+
+MEMORY_EVIDENCE:
+- If MEMORY is not NONE, copy the shortest exact phrase from LATEST that
+  directly supports the memory.
+- If MEMORY is NONE, return NONE.
+- Do not use Captain's reply as evidence.
+- Do not use Captain's imagination as evidence.
+- Do not use an inference as evidence.
+- Do not use old stored memories as evidence for a new memory.
+
+JOKE_EVIDENCE:
+- If JOKE is not NONE, copy the shortest exact phrase from LATEST that
+  establishes or continues the recurring joke.
+- If JOKE is NONE, return NONE.
+- Captain merely making a joke does NOT establish a running joke.
+
+EVENT_EVIDENCE:
+- If EVENT is not NONE, copy the shortest exact phrase from LATEST that
+  establishes the notable event.
+- If EVENT is NONE, return NONE.
+- Fiction invented by Captain cannot become a real relationship event.
+
+SERVER_LORE_EVIDENCE:
+- If SERVER_LORE is not NONE, copy the shortest exact phrase from LATEST
+  that supports the community lore.
+- If SERVER_LORE is NONE, return NONE.
+- Never turn Captain's invented embellishment into server history.
+
+Evidence must be an exact substring of the member's LATEST message.
+When no exact supporting phrase exists, return NONE for both the proposed
+write and its evidence.
 
 HUMOR DETECTION:
 
@@ -2964,6 +3993,35 @@ def clean_brain_value(
     return value
 
 
+def evidence_is_grounded(
+    message_content,
+    evidence
+):
+    """
+    Permanent-memory safety gate.
+
+    Evidence must be a real substring of the member's
+    current Discord message. This prevents Captain's
+    generated embellishments from becoming permanent facts.
+    """
+
+    if not evidence:
+        return False
+
+    source = str(
+        message_content or ""
+    ).strip().casefold()
+
+    proof = str(
+        evidence or ""
+    ).strip().casefold()
+
+    if not source or not proof:
+        return False
+
+    return proof in source
+
+
 async def apply_analysis(
     message,
     result,
@@ -3007,6 +4065,67 @@ async def apply_analysis(
         "KEEP"
     )
 
+    # ---------------------------------------------------------
+    # Identity safety: relationship nicknames belong to the
+    # MESSAGE AUTHOR. Never allow Captain/Barnacle identity
+    # labels to leak into a crew member's nickname.
+    # ---------------------------------------------------------
+
+    if nickname:
+
+        blocked_identity_nicknames = {
+            "barnacle",
+            "captain cutlass",
+            "captain",
+            "cutlass",
+            "constable cutlass",
+            "the captain",
+            "the parrot",
+            "parrot",
+        }
+
+        normalized_nickname = (
+            nickname
+            .strip()
+            .lower()
+        )
+
+        if normalized_nickname in blocked_identity_nicknames:
+
+            print(
+                "Blocked contaminated crew nickname:",
+                repr(nickname),
+                "for user",
+                message.author.id
+            )
+
+            nickname = None
+
+    # ---------------------------------------------------------
+    # Nickname collision safety.
+    #
+    # AI-generated relationship nicknames must be unique
+    # within the guild. This prevents a nickname belonging
+    # to one crewmate from leaking onto another member.
+    # ---------------------------------------------------------
+
+    if nickname:
+
+        if await nickname_is_taken(
+            message.guild.id,
+            nickname,
+            exclude_user_id=message.author.id
+        ):
+
+            print(
+                "Blocked duplicate crew nickname:",
+                repr(nickname),
+                "for user",
+                message.author.id
+            )
+
+            nickname = None
+
     joke = clean_brain_value(
         result.get(
             "joke",
@@ -3034,6 +4153,98 @@ async def apply_analysis(
             "NONE"
         )
     )
+
+    memory_evidence = clean_brain_value(
+        result.get(
+            "memory_evidence",
+            "NONE"
+        )
+    )
+
+    joke_evidence = clean_brain_value(
+        result.get(
+            "joke_evidence",
+            "NONE"
+        )
+    )
+
+    event_evidence = clean_brain_value(
+        result.get(
+            "event_evidence",
+            "NONE"
+        )
+    )
+
+    server_lore_evidence = clean_brain_value(
+        result.get(
+            "server_lore_evidence",
+            "NONE"
+        )
+    )
+
+    message_content = str(
+        message.content or ""
+    )
+
+    permanent_writes = (
+        (
+            "memory",
+            memory,
+            memory_evidence,
+        ),
+        (
+            "joke",
+            joke,
+            joke_evidence,
+        ),
+        (
+            "event",
+            event,
+            event_evidence,
+        ),
+        (
+            "server_lore",
+            server_lore,
+            server_lore_evidence,
+        ),
+    )
+
+    grounded = {}
+
+    for (
+        field_name,
+        value,
+        evidence
+    ) in permanent_writes:
+
+        if not value:
+            grounded[field_name] = None
+            continue
+
+        if evidence_is_grounded(
+            message_content,
+            evidence
+        ):
+            grounded[field_name] = value
+            continue
+
+        print(
+            "Blocked ungrounded permanent write:",
+            field_name,
+            "| user:",
+            message.author.id,
+            "| value:",
+            repr(value),
+            "| evidence:",
+            repr(evidence)
+        )
+
+        grounded[field_name] = None
+
+    memory = grounded["memory"]
+    joke = grounded["joke"]
+    event = grounded["event"]
+    server_lore = grounded["server_lore"]
 
 
     if is_creator(
@@ -3447,6 +4658,48 @@ async def handle_commands(
 
     command = content.lower()
 
+    # -----------------------------------------------------
+    # Global short command prefix.
+    #
+    # !c becomes !cutlass before command routing so every
+    # Captain command automatically supports the short form.
+    # -----------------------------------------------------
+
+    if command == "!c":
+        command = "!cutlass"
+
+    elif command.startswith("!c "):
+        command = (
+            "!cutlass "
+            + command[3:]
+        )
+
+        # Keep content synchronized for handlers that use
+        # the original-cased content as well as command.
+        content = (
+            "!cutlass "
+            + content[3:]
+        )
+
+    # -----------------------------------------------------
+    # Short convenience aliases
+    #
+    # These go beyond simple !c -> !cutlass prefix
+    # replacement for common Ship World commands.
+    # -----------------------------------------------------
+
+    short_aliases = {
+        "!cutlass repair": "!cutlass ship repair",
+        "!cutlass upgrades": "!cutlass ship upgrades",
+        "!cutlass history": "!cutlass ship history",
+        "!cutlass treasury": "!cutlass ship treasury",
+        "!cutlass destinations": "!cutlass voyage destinations",
+    }
+
+    if command in short_aliases:
+        command = short_aliases[command]
+        content = command
+
     # Only Captain Cutlass commands belong in this router.
     # Normal conversation and direct mentions must continue
     # through the conversational AI path.
@@ -3683,6 +4936,43 @@ async def handle_commands(
         start_monster_encounter=start_monster_encounter,
         start_boss=start_boss,
         get_active_boss=get_active_boss,
+        get_island_activity_state=get_island_activity_state,
+        record_island_visit=record_island_visit,
+        post_captains_log=post_captains_log
+    ):
+        return True
+
+
+    # -----------------------------------------------------
+    # Unified combat commands
+    #
+    # !cutlass attack / !c attack
+    # !cutlass defend / !c defend
+    # !cutlass flee   / !c flee
+    # !cutlass board  / !c board
+    #
+    # This runs before the legacy encounter-specific
+    # handlers. Old commands remain fully supported.
+    # -----------------------------------------------------
+
+    if await handle_combat_command(
+        message,
+        command,
+        get_ship_settings=get_ship_settings,
+        get_ship=get_ship,
+        get_active_battle=get_active_battle,
+        get_active_monster=get_active_monster,
+        get_active_boss=get_active_boss,
+        attack_enemy=attack_enemy,
+        defend=defend,
+        board_enemy=board_enemy,
+        flee_battle=flee_battle,
+        attack_monster=attack_monster,
+        attack_boss=attack_boss,
+        defend_boss=defend_boss,
+        damage_ship=damage_ship,
+        reward_ship=_reward_ship_unlocked,
+        add_ship_history=add_ship_history,
         post_captains_log=post_captains_log
     ):
         return True
@@ -3699,6 +4989,7 @@ async def handle_commands(
         format_battle=format_battle,
         attack_enemy=attack_enemy,
         defend=defend,
+        board_enemy=board_enemy,
         flee_battle=flee_battle,
         damage_ship=damage_ship,
         reward_ship=reward_ship,
@@ -4724,13 +6015,19 @@ async def on_message(
 
         story_mode = (
             content_lower
-            == "!cutlass story"
+            in {
+                "!cutlass story",
+                "!c story",
+            }
         )
 
 
         punbattle_mode = (
             content_lower
-            == "!cutlass punbattle"
+            in {
+                "!cutlass punbattle",
+                "!c punbattle",
+            }
         )
 
 
@@ -4956,7 +6253,8 @@ async def on_message(
             conversation,
             member_context,
             target_context,
-            world_context
+            world_context,
+            gameplay_context
         ) = await asyncio.gather(
 
             build_conversation(
@@ -4973,6 +6271,10 @@ async def on_message(
 
             build_world_context(
                 message.guild.id
+            ),
+
+            build_gameplay_context(
+                message
             )
         )
 
@@ -4986,6 +6288,7 @@ async def on_message(
             member_context,
             target_context,
             world_context,
+            gameplay_context,
             humor_mode,
             direct_question_mode,
             captain_mood=settings["mood"],
@@ -5069,20 +6372,23 @@ async def on_message(
         )
 
 
-if not DISCORD_TOKEN:
 
-    raise RuntimeError(
-        "DISCORD_TOKEN missing."
+if __name__ == "__main__":
+
+    if not DISCORD_TOKEN:
+
+        raise RuntimeError(
+            "DISCORD_TOKEN missing."
+        )
+
+
+    if not OPENAI_API_KEY:
+
+        raise RuntimeError(
+            "OPENAI_API_KEY missing."
+        )
+
+
+    bot.run(
+        DISCORD_TOKEN
     )
-
-
-if not OPENAI_API_KEY:
-
-    raise RuntimeError(
-        "OPENAI_API_KEY missing."
-    )
-
-
-bot.run(
-    DISCORD_TOKEN
-)

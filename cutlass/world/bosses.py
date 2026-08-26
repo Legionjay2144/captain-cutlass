@@ -3,6 +3,14 @@ import random
 
 import aiosqlite
 
+from cutlass.world.combat_scaling import (
+    scale_encounter_stats,
+    roll_player_damage,
+    ship_can_fight,
+    disabled_ship_message,
+)
+from cutlass.world.locks import get_guild_lock
+
 
 DB_PATH = os.getenv(
     "DATABASE_PATH",
@@ -101,6 +109,37 @@ async def initialize_bosses():
         await db.close()
 
 
+async def add_boss_event(
+    boss_id,
+    guild_id,
+    action,
+    description
+):
+    db = await _db()
+
+    try:
+        await db.execute("""
+            INSERT INTO boss_events (
+                boss_id,
+                guild_id,
+                action,
+                description
+            )
+            VALUES (?, ?, ?, ?)
+        """, (
+            boss_id,
+            guild_id,
+            action,
+            description,
+        ))
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+
+
 async def get_active_boss(guild_id):
 
     db = await _db()
@@ -125,63 +164,90 @@ async def get_active_boss(guild_id):
 
 async def start_boss(
     guild_id,
-    boss_key
+    boss_key,
+    ship=None
 ):
+    async with get_guild_lock(guild_id):
 
-    active = await get_active_boss(
-        guild_id
-    )
+        active = await get_active_boss(
+            guild_id
+        )
 
-    if active:
-        return False, active
+        if active:
+            return False, active
 
-    if boss_key not in BOSSES:
-        return False, "Unknown boss."
+        if boss_key not in BOSSES:
+            return False, "Unknown boss."
 
-    boss = BOSSES[boss_key]
+        boss = BOSSES[boss_key]
 
-    db = await _db()
+        scaled = scale_encounter_stats(
+            ship,
+            base_hp=boss["hp"],
+            attack_min=boss["attack_min"],
+            attack_max=boss["attack_max"],
+            reward_min=boss["reward_min"],
+            reward_max=boss["reward_max"],
+            xp_reward=boss["xp"],
+            danger=boss["danger"],
+            encounter_type="boss",
+        )
 
-    try:
-        await db.execute("""
-            INSERT INTO boss_encounters (
+        db = await _db()
+
+        try:
+            await db.execute("""
+                INSERT INTO boss_encounters (
+                    guild_id,
+                    boss_key,
+                    name,
+                    hp,
+                    max_hp,
+                    attack_min,
+                    attack_max,
+                    reward_min,
+                    reward_max,
+                    xp_reward,
+                    danger,
+                    max_phase
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
                 guild_id,
                 boss_key,
-                name,
-                hp,
-                max_hp,
-                attack_min,
-                attack_max,
-                reward_min,
-                reward_max,
-                xp_reward,
-                danger,
-                max_phase
+                boss["name"],
+                scaled["max_hp"],
+                scaled["max_hp"],
+                scaled["attack_min"],
+                scaled["attack_max"],
+                scaled["reward_min"],
+                scaled["reward_max"],
+                scaled["xp_reward"],
+                boss["danger"],
+                boss["phases"],
+            ))
+
+            await db.commit()
+
+        finally:
+            await db.close()
+
+        active_boss = await get_active_boss(
+            guild_id
+        )
+
+        if active_boss:
+            await add_boss_event(
+                active_boss["id"],
+                guild_id,
+                "start",
+                (
+                    active_boss["name"]
+                    + " entered combat with the crew."
+                )
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            guild_id,
-            boss_key,
-            boss["name"],
-            boss["hp"],
-            boss["hp"],
-            boss["attack_min"],
-            boss["attack_max"],
-            boss["reward_min"],
-            boss["reward_max"],
-            boss["xp"],
-            boss["danger"],
-            boss["phases"],
-        ))
 
-        await db.commit()
-
-    finally:
-        await db.close()
-
-    return True, await get_active_boss(
-        guild_id
-    )
+        return True, active_boss
 
 
 async def format_boss(guild_id):
@@ -216,7 +282,10 @@ async def format_boss(guild_id):
     )
 
 
-async def attack_boss(guild_id):
+async def attack_boss(
+    guild_id,
+    ship=None
+):
 
     boss = await get_active_boss(
         guild_id
@@ -225,9 +294,16 @@ async def attack_boss(guild_id):
     if not boss:
         return False, "There is no boss to attack.", None
 
-    player_damage = random.randint(
-        18,
-        34
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
+
+    player_damage = roll_player_damage(
+        ship,
+        "boss"
     )
 
     hp = max(
@@ -311,11 +387,51 @@ async def attack_boss(guild_id):
     finally:
         await db.close()
 
+    await add_boss_event(
+        boss["id"],
+        guild_id,
+        "attack",
+        (
+            "The crew dealt "
+            + str(player_damage)
+            + " damage to "
+            + boss["name"]
+            + "."
+        )
+    )
+
+    if phase_changed:
+        await add_boss_event(
+            boss["id"],
+            guild_id,
+            "phase_change",
+            (
+                boss["name"]
+                + " entered phase "
+                + str(phase)
+                + "."
+            )
+        )
+
     if hp <= 0:
 
         reward = random.randint(
             int(boss["reward_min"]),
             int(boss["reward_max"])
+        )
+
+        await add_boss_event(
+            boss["id"],
+            guild_id,
+            "victory",
+            (
+                boss["name"]
+                + " was defeated. Reward "
+                + str(reward)
+                + " doubloons and "
+                + str(boss["xp_reward"])
+                + " XP."
+            )
         )
 
         return True, (
@@ -383,7 +499,17 @@ async def attack_boss(guild_id):
     }
 
 
-async def defend_boss(guild_id):
+async def defend_boss(
+    guild_id,
+    ship=None
+):
+
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
 
     boss = await get_active_boss(
         guild_id
@@ -404,6 +530,19 @@ async def defend_boss(guild_id):
     damage = max(
         1,
         raw // 2
+    )
+
+    await add_boss_event(
+        boss["id"],
+        guild_id,
+        "defend",
+        (
+            "The crew defended against "
+            + boss["name"]
+            + " and reduced incoming damage to "
+            + str(damage)
+            + "."
+        )
     )
 
     return True, (

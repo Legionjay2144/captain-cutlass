@@ -3,6 +3,14 @@ import random
 
 import aiosqlite
 
+from cutlass.world.combat_scaling import (
+    scale_encounter_stats,
+    roll_player_damage,
+    ship_can_fight,
+    disabled_ship_message,
+)
+from cutlass.world.locks import get_guild_lock
+
 
 DB_PATH = os.getenv(
     "DATABASE_PATH",
@@ -123,72 +131,127 @@ async def get_active_monster(guild_id):
         await db.close()
 
 
-async def start_monster_encounter(
+async def add_monster_event(
+    encounter_id,
     guild_id,
-    monster_key=None
+    action,
+    description
 ):
-
-    active = await get_active_monster(
-        guild_id
-    )
-
-    if active:
-        return False, active
-
-    if monster_key is None:
-        monster_key = random.choice(
-            list(MONSTERS.keys())
-        )
-
-    if monster_key not in MONSTERS:
-        return False, "Unknown monster."
-
-    monster = MONSTERS[monster_key]
-
     db = await _db()
 
     try:
-        cursor = await db.execute("""
-            INSERT INTO monster_encounters (
+        await db.execute("""
+            INSERT INTO monster_events (
+                encounter_id,
                 guild_id,
-                monster_key,
-                name,
-                encounter_type,
-                hp,
-                max_hp,
-                attack_min,
-                attack_max,
-                reward_min,
-                reward_max,
-                xp_reward,
-                danger
+                action,
+                description
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
         """, (
+            encounter_id,
             guild_id,
-            monster_key,
-            monster["name"],
-            monster["type"],
-            monster["hp"],
-            monster["hp"],
-            monster["attack_min"],
-            monster["attack_max"],
-            monster["reward_min"],
-            monster["reward_max"],
-            monster["xp"],
-            monster["danger"],
+            action,
+            description,
         ))
 
         await db.commit()
 
-        encounter_id = cursor.lastrowid
-
     finally:
         await db.close()
 
-    return True, await get_active_monster(
-        guild_id
-    )
+
+
+async def start_monster_encounter(
+    guild_id,
+    monster_key=None,
+    ship=None
+):
+    async with get_guild_lock(guild_id):
+
+        active = await get_active_monster(
+            guild_id
+        )
+
+        if active:
+            return False, active
+
+        if monster_key is None:
+            monster_key = random.choice(
+                list(MONSTERS.keys())
+            )
+
+        if monster_key not in MONSTERS:
+            return False, "Unknown monster."
+
+        monster = MONSTERS[monster_key]
+
+        scaled = scale_encounter_stats(
+            ship,
+            base_hp=monster["hp"],
+            attack_min=monster["attack_min"],
+            attack_max=monster["attack_max"],
+            reward_min=monster["reward_min"],
+            reward_max=monster["reward_max"],
+            xp_reward=monster["xp"],
+            danger=monster["danger"],
+            encounter_type="monster",
+        )
+
+        db = await _db()
+
+        try:
+            cursor = await db.execute("""
+                INSERT INTO monster_encounters (
+                    guild_id,
+                    monster_key,
+                    name,
+                    encounter_type,
+                    hp,
+                    max_hp,
+                    attack_min,
+                    attack_max,
+                    reward_min,
+                    reward_max,
+                    xp_reward,
+                    danger
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                guild_id,
+                monster_key,
+                monster["name"],
+                monster["type"],
+                scaled["max_hp"],
+                scaled["max_hp"],
+                scaled["attack_min"],
+                scaled["attack_max"],
+                scaled["reward_min"],
+                scaled["reward_max"],
+                scaled["xp_reward"],
+                monster["danger"],
+            ))
+
+            await db.commit()
+
+            encounter_id = cursor.lastrowid
+
+        finally:
+            await db.close()
+
+        await add_monster_event(
+            encounter_id,
+            guild_id,
+            "start",
+            (
+                monster["name"]
+                + " entered combat with the crew."
+            )
+        )
+
+        return True, await get_active_monster(
+            guild_id
+        )
 
 
 async def format_monster(guild_id):
@@ -224,7 +287,17 @@ async def format_monster(guild_id):
     )
 
 
-async def attack_monster(guild_id):
+async def attack_monster(
+    guild_id,
+    ship=None
+):
+
+    if not ship_can_fight(ship):
+        return (
+            False,
+            disabled_ship_message(ship),
+            None
+        )
 
     encounter = await get_active_monster(
         guild_id
@@ -233,9 +306,9 @@ async def attack_monster(guild_id):
     if not encounter:
         return False, "There is no monster to attack.", None
 
-    player_damage = random.randint(
-        15,
-        30
+    player_damage = roll_player_damage(
+        ship,
+        "monster"
     )
 
     hp = max(
@@ -287,6 +360,20 @@ async def attack_monster(guild_id):
             int(encounter["reward_max"])
         )
 
+        await add_monster_event(
+            encounter["id"],
+            guild_id,
+            "victory",
+            (
+                encounter["name"]
+                + " was defeated. Reward "
+                + str(reward)
+                + " doubloons and "
+                + str(encounter["xp_reward"])
+                + " XP."
+            )
+        )
+
         return True, (
             "**"
             + encounter["name"].upper()
@@ -307,6 +394,23 @@ async def attack_monster(guild_id):
             "enemy_damage": 0,
             "name": encounter["name"],
         }
+
+    await add_monster_event(
+        encounter["id"],
+        guild_id,
+        "attack",
+        (
+            "The crew dealt "
+            + str(player_damage)
+            + " damage to "
+            + encounter["name"]
+            + "; "
+            + encounter["name"]
+            + " retaliated for "
+            + str(enemy_damage)
+            + " damage."
+        )
+    )
 
     return True, (
         "**MONSTER ATTACK**\n"
