@@ -336,9 +336,36 @@ def disabled_ship_message(ship=None):
         else "The Living Ship"
     )
 
+    try:
+        hull = max(
+            0,
+            int(
+                ship.get(
+                    "hull",
+                    0
+                )
+            )
+        ) if ship else 0
+
+    except (TypeError, ValueError):
+        hull = 0
+
+    if hull <= 0:
+
+        return (
+            "**SHIP DISABLED**\n"
+            + name
+            + " has **0 hull** and cannot continue fighting.\n"
+            "Passive emergency recovery is active, or use "
+            "`!c repair` for faster repairs."
+        )
+
     return (
-        "**SHIP DISABLED**\n"
+        "**SHIP DISABLED / RECOVERING**\n"
         + name
-        + " has **0 hull** and cannot continue fighting.\n"
-        "Repair the ship before returning to combat."
+        + " has **"
+        + str(hull)
+        + " hull** but remains below operational strength.\n"
+        "Passive recovery is active, or use "
+        "`!c repair` for faster repairs."
     )

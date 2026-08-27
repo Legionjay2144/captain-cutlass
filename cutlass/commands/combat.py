@@ -6,6 +6,7 @@ async def handle_combat_command(
     *,
     get_ship_settings,
     get_ship,
+    get_ship_operational_status,
     get_active_battle,
     get_active_monster,
     get_active_boss,
@@ -102,11 +103,26 @@ async def handle_combat_command(
             guild_id
         )
 
-        if int(ship["hull"]) <= 0:
+        operational = await get_ship_operational_status(
+            guild_id
+        )
+
+        if not operational["operational"]:
             await message.reply(
-                "**THE SHIP IS DISABLED**\n"
-                "The Living Ship is at **0 hull**. "
-                "Repair the ship before continuing combat.",
+                "**SHIP DISABLED / RECOVERING**\n"
+                "The Living Ship cannot continue combat until it reaches **"
+                + str(operational["threshold"])
+                + "/"
+                + str(operational["max_hull"])
+                + " hull**.\n"
+                "Current hull: **"
+                + str(operational["hull"])
+                + "/"
+                + str(operational["max_hull"])
+                + "**.\n"
+                "Needed: **+"
+                + str(operational["needed"])
+                + " hull**.",
                 mention_author=False
             )
             return True
@@ -312,53 +328,88 @@ async def handle_combat_command(
             )
 
         # ---------------------------------------------------------
-        # Ship disabled
+        # Ship disabled / recovering
+        #
+        # The ship becomes non-operational below the recovery
+        # threshold, even if hull is still above zero.
         # ---------------------------------------------------------
 
-        if (
-            ship_after
-            and int(ship_after["hull"]) <= 0
-        ):
+        if ship_after:
 
-            text += (
-                "\n\n**SHIP DISABLED!**\n"
-                "The hull has been battered to zero. "
-                "The crew can no longer continue the fight."
+            operational_after = await get_ship_operational_status(
+                guild_id
             )
 
-            history_type = (
-                "battle_defeat"
-                if encounter == "naval"
-                else (
-                    "monster_defeat"
-                    if encounter == "monster"
-                    else "boss_defeat"
+            if not operational_after["operational"]:
+
+                if int(ship_after["hull"]) <= 0:
+
+                    text += (
+                        "\n\n**SHIP DISABLED!**\n"
+                        "The hull has been battered to **0/"
+                        + str(operational_after["max_hull"])
+                        + "**.\n"
+                        "Passive emergency recovery has begun."
+                    )
+
+                else:
+
+                    text += (
+                        "\n\n**SHIP DISABLED / RECOVERING!**\n"
+                        "The ship has fallen below operational hull.\n"
+                        "Current hull: **"
+                        + str(operational_after["hull"])
+                        + "/"
+                        + str(operational_after["max_hull"])
+                        + "**\n"
+                        "Operational at: **"
+                        + str(operational_after["threshold"])
+                        + "/"
+                        + str(operational_after["max_hull"])
+                        + "**\n"
+                        "Needed: **+"
+                        + str(operational_after["needed"])
+                        + " hull**."
+                    )
+
+                history_type = (
+                    "battle_defeat"
+                    if encounter == "naval"
+                    else (
+                        "monster_defeat"
+                        if encounter == "monster"
+                        else "boss_defeat"
+                    )
                 )
-            )
 
-            await add_ship_history(
-                guild_id,
-                "The Living Ship was disabled during "
-                + encounter
-                + " combat.",
-                history_type
-            )
+                await add_ship_history(
+                    guild_id,
+                    (
+                        "The Living Ship became non-operational during "
+                        + encounter
+                        + " combat at "
+                        + str(operational_after["hull"])
+                        + "/"
+                        + str(operational_after["max_hull"])
+                        + " hull."
+                    ),
+                    history_type
+                )
 
-            await post_captains_log(
-                message.guild,
-                text,
-                encounter
-            )
+                await post_captains_log(
+                    message.guild,
+                    text,
+                    encounter
+                )
 
-            await message.reply(
-                text[:1900],
-                mention_author=False
-            )
+                await message.reply(
+                    text[:1900],
+                    mention_author=False
+                )
 
-            return True
+                return True
 
-        # ---------------------------------------------------------
-        # Victory rewards
+
         # ---------------------------------------------------------
 
         if result.get("victory"):

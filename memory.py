@@ -406,10 +406,32 @@ async def initialize_database():
                 user_id INTEGER NOT NULL,
                 username TEXT,
                 summary TEXT DEFAULT '',
+                gender TEXT,
+                pronouns TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (guild_id, user_id)
             )
         """)
+
+        # Explicit identity fields.
+        # NULL means unknown and must be treated as gender-neutral.
+        if not await column_exists(
+            db,
+            "user_profiles",
+            "gender"
+        ):
+            await db.execute(
+                "ALTER TABLE user_profiles ADD COLUMN gender TEXT"
+            )
+
+        if not await column_exists(
+            db,
+            "user_profiles",
+            "pronouns"
+        ):
+            await db.execute(
+                "ALTER TABLE user_profiles ADD COLUMN pronouns TEXT"
+            )
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_memories (
@@ -851,7 +873,7 @@ async def get_user_profile(
     db = await get_db()
 
     cursor = await db.execute("""
-        SELECT username, summary
+        SELECT username, summary, gender, pronouns
         FROM user_profiles
         WHERE guild_id = ?
         AND user_id = ?
@@ -868,8 +890,91 @@ async def get_user_profile(
 
     return {
         "username": row[0],
-        "summary": row[1] or ""
+        "summary": row[1] or "",
+        "gender": row[2],
+        "pronouns": row[3]
     }
+
+
+# ---------------------------------------------------------
+# Explicit user identity
+#
+# Identity information may ONLY come from an explicit
+# statement by the user. Never infer gender or pronouns
+# from names, avatars, writing style, roles, or context.
+#
+# _IDENTITY_UNSET = leave the existing value unchanged.
+# None = explicitly clear the stored value.
+# ---------------------------------------------------------
+
+_IDENTITY_UNSET = object()
+
+
+async def update_user_identity(
+    guild_id,
+    user_id,
+    *,
+    gender=_IDENTITY_UNSET,
+    pronouns=_IDENTITY_UNSET
+):
+
+    if (
+        gender is _IDENTITY_UNSET
+        and pronouns is _IDENTITY_UNSET
+    ):
+        return
+
+    db = await get_db()
+
+    updates = []
+    values = []
+
+    if gender is not _IDENTITY_UNSET:
+
+        if gender is None:
+            clean_gender = None
+        else:
+            clean_gender = str(
+                gender
+            ).strip()[:100] or None
+
+        updates.append("gender = ?")
+        values.append(clean_gender)
+
+    if pronouns is not _IDENTITY_UNSET:
+
+        if pronouns is None:
+            clean_pronouns = None
+        else:
+            clean_pronouns = str(
+                pronouns
+            ).strip()[:100] or None
+
+        updates.append("pronouns = ?")
+        values.append(clean_pronouns)
+
+    updates.append(
+        "updated_at = CURRENT_TIMESTAMP"
+    )
+
+    values.extend([
+        guild_id,
+        user_id
+    ])
+
+    async with _write_lock:
+
+        await db.execute(
+            f"""
+            UPDATE user_profiles
+            SET {", ".join(updates)}
+            WHERE guild_id = ?
+            AND user_id = ?
+            """,
+            values
+        )
+
+        await db.commit()
 
 
 async def add_user_memory(

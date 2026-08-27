@@ -84,6 +84,15 @@ UPGRADES = {
 }
 
 
+# =========================================================
+# Disabled Ship Recovery
+# =========================================================
+
+PASSIVE_RECOVERY_INTERVAL_SECONDS = 600
+PASSIVE_RECOVERY_HULL_PER_INTERVAL = 1
+OPERATIONAL_HULL_PERCENT = 0.10
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -164,6 +173,37 @@ async def initialize_ship_world():
             PRIMARY KEY (guild_id, user_id)
         );
         """)
+        # -------------------------------------------------
+        # Disabled ship passive-recovery migration
+        # -------------------------------------------------
+
+        columns = await (
+            await db.execute(
+                "PRAGMA table_info(ships)"
+            )
+        ).fetchall()
+
+        column_names = {
+            row["name"]
+            for row in columns
+        }
+
+        if "recovery_started_at" not in column_names:
+            await db.execute(
+                """
+                ALTER TABLE ships
+                ADD COLUMN recovery_started_at DATETIME
+                """
+            )
+
+        if "recovery_last_at" not in column_names:
+            await db.execute(
+                """
+                ALTER TABLE ships
+                ADD COLUMN recovery_last_at DATETIME
+                """
+            )
+
         await db.commit()
     finally:
         await db.close()
@@ -201,14 +241,45 @@ async def set_ship_setting(guild_id, field, value):
         await db.close()
 
 
-async def get_ship(guild_id):
+async def _get_ship_raw(guild_id):
     await ensure_ship(guild_id)
+
     db = await _db()
+
     try:
-        row = await (await db.execute("SELECT * FROM ships WHERE guild_id = ?", (guild_id,))).fetchone()
+
+        row = await (
+            await db.execute(
+                """
+                SELECT *
+                FROM ships
+                WHERE guild_id = ?
+                """,
+                (guild_id,)
+            )
+        ).fetchone()
+
         return dict(row)
+
     finally:
         await db.close()
+
+
+async def get_ship(guild_id):
+    """
+    Return the Living Ship after applying any passive
+    disabled-ship recovery earned through elapsed real time.
+    """
+
+    await ensure_ship(guild_id)
+
+    await apply_passive_recovery(
+        guild_id
+    )
+
+    return await _get_ship_raw(
+        guild_id
+    )
 
 
 async def get_upgrade_levels(guild_id):
@@ -224,6 +295,322 @@ def ship_caps(upgrades):
     return {
         "hull": 100 + 20 * upgrades.get("reinforced hull", 0),
         "supplies": 100 + 25 * upgrades.get("expanded hold", 0),
+    }
+
+
+def operational_hull_threshold(max_hull):
+    """
+    Hull required before a disabled ship becomes operational.
+
+    Passive recovery stops at this threshold.
+    """
+
+    return max(
+        1,
+        int(
+            (int(max_hull) * OPERATIONAL_HULL_PERCENT)
+            + 0.999999
+        )
+    )
+
+
+def _parse_db_timestamp(value):
+
+    if not value:
+        return None
+
+    try:
+
+        dt = datetime.strptime(
+            str(value),
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        return dt.replace(
+            tzinfo=timezone.utc
+        )
+
+    except (TypeError, ValueError):
+        return None
+
+
+async def apply_passive_recovery(guild_id):
+    """
+    Apply passive hull recovery earned through elapsed real time.
+
+    Recovery:
+      - costs no treasury
+      - survives restarts and downtime
+      - cannot over-heal
+      - stops at the operational threshold
+    """
+
+    await ensure_ship(guild_id)
+
+    upgrades = await get_upgrade_levels(
+        guild_id
+    )
+
+    max_hull = int(
+        ship_caps(upgrades)["hull"]
+    )
+
+    threshold = operational_hull_threshold(
+        max_hull
+    )
+
+    now = _now()
+
+    db = await _db()
+
+    try:
+
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    hull,
+                    recovery_started_at,
+                    recovery_last_at
+                FROM ships
+                WHERE guild_id = ?
+                """,
+                (guild_id,)
+            )
+        ).fetchone()
+
+        if not row:
+            return {
+                "recovered": 0,
+                "hull": 0,
+                "threshold": threshold,
+                "recovering": False,
+                "restored": False,
+            }
+
+        hull = max(
+            0,
+            int(row["hull"])
+        )
+
+        recovery_started = _parse_db_timestamp(
+            row["recovery_started_at"]
+        )
+
+        recovery_last = _parse_db_timestamp(
+            row["recovery_last_at"]
+        )
+
+        # Already operational.
+        if hull >= threshold:
+
+            if recovery_started or recovery_last:
+
+                await db.execute(
+                    """
+                    UPDATE ships
+                    SET recovery_started_at = NULL,
+                        recovery_last_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = ?
+                    """,
+                    (guild_id,)
+                )
+
+                await db.commit()
+
+            return {
+                "recovered": 0,
+                "hull": hull,
+                "threshold": threshold,
+                "recovering": False,
+                "restored": False,
+            }
+
+        # Below threshold with no clock means recovery begins now.
+        if recovery_started is None:
+
+            recovery_started = now
+
+            await db.execute(
+                """
+                UPDATE ships
+                SET recovery_started_at = ?,
+                    recovery_last_at = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                """,
+                (
+                    _ts(now),
+                    _ts(now),
+                    guild_id,
+                )
+            )
+
+            await db.commit()
+
+            return {
+                "recovered": 0,
+                "hull": hull,
+                "threshold": threshold,
+                "recovering": True,
+                "restored": False,
+            }
+
+        if recovery_last is None:
+            recovery_last = recovery_started
+
+        elapsed = max(
+            0,
+            int(
+                (
+                    now - recovery_last
+                ).total_seconds()
+            )
+        )
+
+        intervals = (
+            elapsed
+            // PASSIVE_RECOVERY_INTERVAL_SECONDS
+        )
+
+        if intervals < 1:
+
+            return {
+                "recovered": 0,
+                "hull": hull,
+                "threshold": threshold,
+                "recovering": True,
+                "restored": False,
+            }
+
+        possible_recovery = (
+            intervals
+            * PASSIVE_RECOVERY_HULL_PER_INTERVAL
+        )
+
+        recovered = min(
+            possible_recovery,
+            threshold - hull
+        )
+
+        new_hull = min(
+            threshold,
+            hull + recovered
+        )
+
+        intervals_used = (
+            recovered
+            + PASSIVE_RECOVERY_HULL_PER_INTERVAL
+            - 1
+        ) // PASSIVE_RECOVERY_HULL_PER_INTERVAL
+
+        new_last = (
+            recovery_last
+            + timedelta(
+                seconds=(
+                    intervals_used
+                    * PASSIVE_RECOVERY_INTERVAL_SECONDS
+                )
+            )
+        )
+
+        restored = new_hull >= threshold
+
+        await db.execute(
+            """
+            UPDATE ships
+            SET hull = ?,
+                recovery_last_at = ?,
+                recovery_started_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (
+                new_hull,
+                None if restored else _ts(new_last),
+                None if restored else _ts(recovery_started),
+                guild_id,
+            )
+        )
+
+        await db.commit()
+
+        result = {
+            "recovered": recovered,
+            "hull": new_hull,
+            "threshold": threshold,
+            "recovering": not restored,
+            "restored": restored,
+        }
+
+    finally:
+        await db.close()
+
+
+    if restored:
+
+        await add_history(
+            guild_id,
+            (
+                "The Living Ship completed **passive emergency recovery** "
+                "and returned to **operational status** at **"
+                + str(new_hull)
+                + "/"
+                + str(max_hull)
+                + " hull**."
+            ),
+            "ship_restored"
+        )
+
+    return result
+
+
+async def get_ship_operational_status(guild_id):
+    """
+    Return authoritative Living Ship operational state.
+
+    A ship below the configured operational hull threshold
+    remains disabled even when passive recovery has raised
+    hull above zero.
+    """
+
+    ship = await get_ship(
+        guild_id
+    )
+
+    upgrades = await get_upgrade_levels(
+        guild_id
+    )
+
+    max_hull = int(
+        ship_caps(upgrades)["hull"]
+    )
+
+    threshold = operational_hull_threshold(
+        max_hull
+    )
+
+    hull = max(
+        0,
+        int(ship["hull"])
+    )
+
+    operational = (
+        hull >= threshold
+    )
+
+    return {
+        "operational": operational,
+        "disabled": not operational,
+        "recovering": not operational,
+        "hull": hull,
+        "max_hull": max_hull,
+        "threshold": threshold,
+        "needed": max(
+            0,
+            threshold - hull
+        ),
     }
 
 
@@ -527,6 +914,14 @@ async def repair_ship(guild_id):
 
         disabled = current_hull <= 0
 
+        operational_threshold = operational_hull_threshold(
+            max_hull
+        )
+
+        was_recovering = (
+            current_hull < operational_threshold
+        )
+
         # Base repair cost scales with ship level.
         cost = 100 + (
             (level - 1) * 25
@@ -598,12 +993,25 @@ async def repair_ship(guild_id):
         db = await _db()
 
         try:
+            became_operational = (
+                was_recovering
+                and new_hull >= operational_threshold
+            )
+
             await db.execute(
                 """
                 UPDATE ships
                 SET treasury = treasury - ?,
                     hull = ?,
                     sails = ?,
+                    recovery_started_at = CASE
+                        WHEN ? THEN NULL
+                        ELSE recovery_started_at
+                    END,
+                    recovery_last_at = CASE
+                        WHEN ? THEN NULL
+                        ELSE recovery_last_at
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE guild_id = ?
                 """,
@@ -611,6 +1019,8 @@ async def repair_ship(guild_id):
                     cost,
                     new_hull,
                     new_sails,
+                    became_operational,
+                    became_operational,
                     guild_id,
                 )
             )
@@ -619,6 +1029,23 @@ async def repair_ship(guild_id):
 
         finally:
             await db.close()
+
+        if (
+            was_recovering
+            and new_hull >= operational_threshold
+        ):
+            await add_history(
+                guild_id,
+                (
+                    "Paid repairs restored the Living Ship "
+                    "to **operational status** at **"
+                    + str(new_hull)
+                    + "/"
+                    + str(max_hull)
+                    + " hull**."
+                ),
+                "ship_restored"
+            )
 
         if disabled:
             title = "**EMERGENCY REPAIRS COMPLETE**"
@@ -842,12 +1269,30 @@ async def start_voyage(
                 + "**."
             )
 
-        if int(ship["hull"]) <= 0:
+        operational = await get_ship_operational_status(
+            guild_id
+        )
+
+        if not operational["operational"]:
             return (
                 False,
-                "**SHIP DISABLED**\n"
-                "The Living Ship cannot begin a voyage at **0 hull**. "
-                "Repair the ship before leaving port."
+                "**SHIP DISABLED / RECOVERING**\n"
+                "The Living Ship cannot begin a voyage until it reaches "
+                "**"
+                + str(operational["threshold"])
+                + "/"
+                + str(operational["max_hull"])
+                + " hull**.\n"
+                "Current hull: **"
+                + str(operational["hull"])
+                + "/"
+                + str(operational["max_hull"])
+                + "**.\n"
+                "Needed to sail: **+"
+                + str(operational["needed"])
+                + " hull**.\n"
+                "Passive recovery continues automatically, or use "
+                "`!c repair` for faster paid repairs."
             )
 
         if ship["supplies"] < info["supplies"]:
@@ -1306,33 +1751,162 @@ def discord_timestamp(timestamp_text):
 
 
 async def format_ship_status(guild_id):
-    ship = await get_ship(guild_id)
-    levels = await get_upgrade_levels(guild_id)
-    caps = ship_caps(levels)
-    voyage = await get_active_voyage(guild_id)
-    status = "At Sea" if voyage else "Anchored"
+
+    ship = await get_ship(
+        guild_id
+    )
+
+    levels = await get_upgrade_levels(
+        guild_id
+    )
+
+    caps = ship_caps(
+        levels
+    )
+
+    voyage = await get_active_voyage(
+        guild_id
+    )
+
+    max_hull = int(
+        caps["hull"]
+    )
+
+    hull = int(
+        ship["hull"]
+    )
+
+    threshold = operational_hull_threshold(
+        max_hull
+    )
+
+    recovering = (
+        hull < threshold
+    )
+
+    if recovering:
+        status = "DISABLED / RECOVERING"
+    elif voyage:
+        status = "At Sea"
+    else:
+        status = "Anchored"
+
     lines = [
         f"**{ship['name']}**",
         f"Level: **{ship['level']}** | XP: **{ship['xp']}/{xp_needed(ship['level'])}**",
         f"Status: **{status}**",
-        f"Location: **En route to {voyage['destination']}**" if voyage else f"Location: **{ship['location']}**",
+        (
+            f"Location: **En route to {voyage['destination']}**"
+            if voyage
+            else f"Location: **{ship['location']}**"
+        ),
         "",
-        f"Hull: **{ship['hull']}/{caps['hull']}**",
+        f"Hull: **{hull}/{max_hull}**",
         f"Sails: **{ship['sails']}/100**",
         f"Supplies: **{ship['supplies']}/{caps['supplies']}**",
         f"Morale: **{ship['morale']}/100**",
         f"Treasury: **{ship['treasury']} doubloons**",
+    ]
+
+    if recovering:
+
+        remaining = max(
+            0,
+            threshold - hull
+        )
+
+        intervals_remaining = (
+            remaining
+            + PASSIVE_RECOVERY_HULL_PER_INTERVAL
+            - 1
+        ) // PASSIVE_RECOVERY_HULL_PER_INTERVAL
+
+        seconds_remaining = (
+            intervals_remaining
+            * PASSIVE_RECOVERY_INTERVAL_SECONDS
+        )
+
+        hours, remainder = divmod(
+            seconds_remaining,
+            3600
+        )
+
+        minutes = (
+            remainder // 60
+        )
+
+        if hours and minutes:
+            eta_text = (
+                f"{hours}h {minutes}m"
+            )
+
+        elif hours:
+            eta_text = (
+                f"{hours}h"
+            )
+
+        else:
+            eta_text = (
+                f"{minutes}m"
+            )
+
+        lines.extend([
+            "",
+            "**PASSIVE EMERGENCY RECOVERY**",
+            (
+                "Operational Hull: **"
+                + str(threshold)
+                + "/"
+                + str(max_hull)
+                + "**"
+            ),
+            (
+                "Recovery Rate: **+"
+                + str(
+                    PASSIVE_RECOVERY_HULL_PER_INTERVAL
+                )
+                + " hull every "
+                + str(
+                    PASSIVE_RECOVERY_INTERVAL_SECONDS // 60
+                )
+                + " minutes**"
+            ),
+            (
+                "Estimated Time Until Operational: **"
+                + eta_text
+                + "**"
+            ),
+            (
+                "Passive recovery costs **0 doubloons**."
+            ),
+            (
+                "Use `!c repair` for faster paid repairs."
+            ),
+        ])
+
+    lines.extend([
         "",
         f"Voyages Completed: **{ship['voyages_completed']}**",
         f"Distance Sailed: **{ship['distance_sailed']} nautical miles**",
-    ]
+    ])
+
     if voyage:
-        lines += [
+
+        lines.extend([
             "",
             f"Current Voyage: **{voyage['destination']}**",
-            f"Expected Completion: **{discord_timestamp(voyage['completes_at'])}**"
-        ]
-    return "\n".join(lines)
+            (
+                "Expected Completion: **"
+                + discord_timestamp(
+                    voyage["completes_at"]
+                )
+                + "**"
+            )
+        ])
+
+    return "\n".join(
+        lines
+    )
 
 
 async def format_destinations(guild_id):
@@ -1424,32 +1998,105 @@ async def damage_ship(guild_id, amount):
     Apply real combat damage to the Living Ship.
 
     Hull can never fall below zero.
-    Returns the updated ship.
+
+    When damage reduces the ship to zero hull, passive
+    recovery begins automatically.
     """
 
     await ensure_ship(guild_id)
 
-    amount = max(0, int(amount))
+    amount = max(
+        0,
+        int(amount)
+    )
 
     db = await _db()
 
+    became_disabled = False
+
     try:
-        await db.execute(
-            """
-            UPDATE ships
-            SET hull = MAX(0, hull - ?),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE guild_id = ?
-            """,
-            (amount, guild_id)
+
+        row = await (
+            await db.execute(
+                """
+                SELECT hull
+                FROM ships
+                WHERE guild_id = ?
+                """,
+                (guild_id,)
+            )
+        ).fetchone()
+
+        old_hull = max(
+            0,
+            int(row["hull"])
         )
+
+        new_hull = max(
+            0,
+            old_hull - amount
+        )
+
+        became_disabled = (
+            old_hull > 0
+            and new_hull <= 0
+        )
+
+        if became_disabled:
+
+            now_text = _ts()
+
+            await db.execute(
+                """
+                UPDATE ships
+                SET hull = 0,
+                    recovery_started_at = ?,
+                    recovery_last_at = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                """,
+                (
+                    now_text,
+                    now_text,
+                    guild_id,
+                )
+            )
+
+        else:
+
+            await db.execute(
+                """
+                UPDATE ships
+                SET hull = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                """,
+                (
+                    new_hull,
+                    guild_id,
+                )
+            )
 
         await db.commit()
 
     finally:
         await db.close()
 
-    return await get_ship(guild_id)
+    if became_disabled:
+
+        await add_history(
+            guild_id,
+            (
+                "The Living Ship was **DISABLED** at "
+                "**0 hull**. Emergency passive repairs "
+                "have begun."
+            ),
+            "ship_disabled"
+        )
+
+    return await get_ship(
+        guild_id
+    )
 
 
 async def _reward_ship_unlocked(
@@ -1562,7 +2209,21 @@ async def combat_ship_status(guild_id):
         "xp_needed": xp_needed(
             int(ship["level"])
         ),
-        "disabled": int(ship["hull"]) <= 0,
+        "disabled": (
+            int(ship["hull"])
+            < operational_hull_threshold(
+                int(caps["hull"])
+            )
+        ),
+        "operational_threshold": operational_hull_threshold(
+            int(caps["hull"])
+        ),
+        "recovering": (
+            int(ship["hull"])
+            < operational_hull_threshold(
+                int(caps["hull"])
+            )
+        ),
     }
 
 

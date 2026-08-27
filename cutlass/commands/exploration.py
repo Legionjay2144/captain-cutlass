@@ -7,6 +7,7 @@ async def handle_exploration_command(
     *,
     get_ship_settings,
     get_ship,
+    get_ship_operational_status,
     get_active_battle,
     get_active_monster,
     explore_random_island,
@@ -39,11 +40,26 @@ async def handle_exploration_command(
         message.guild.id
     )
 
-    if int(ship["hull"]) <= 0:
+    operational = await get_ship_operational_status(
+        message.guild.id
+    )
+
+    if not operational["operational"]:
         await message.reply(
-            "**SHIP DISABLED**\n"
-            "The Living Ship is at **0 hull**. "
-            "Repair the ship before exploring.",
+            "**SHIP DISABLED / RECOVERING**\n"
+            "The Living Ship cannot explore until it reaches **"
+            + str(operational["threshold"])
+            + "/"
+            + str(operational["max_hull"])
+            + " hull**.\n"
+            "Current hull: **"
+            + str(operational["hull"])
+            + "/"
+            + str(operational["max_hull"])
+            + "**.\n"
+            "Needed: **+"
+            + str(operational["needed"])
+            + " hull**.",
             mention_author=False
         )
         return True

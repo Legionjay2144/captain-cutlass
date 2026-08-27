@@ -247,6 +247,88 @@ async def start_naval_battle(
         )
 
 
+def get_boarding_status(battle):
+    """
+    Return the live boarding state for a naval battle.
+
+    This is the single source of truth used by both
+    !c battle and board_enemy().
+    """
+
+    enemy_hull = max(
+        0,
+        int(battle["enemy_hull"])
+    )
+
+    enemy_max_hull = max(
+        1,
+        int(battle["enemy_max_hull"])
+    )
+
+    required_hull = max(
+        1,
+        int(enemy_max_hull * 0.35)
+    )
+
+    damage_needed = max(
+        0,
+        enemy_hull - required_hull
+    )
+
+    hull_percent = (
+        enemy_hull
+        / enemy_max_hull
+    )
+
+    ready = (
+        hull_percent <= 0.35
+    )
+
+    success_chance = None
+
+    if ready:
+
+        weakness_bonus = int(
+            (
+                (0.35 - hull_percent)
+                / 0.35
+            )
+            * 20
+        )
+
+        success_chance = (
+            55
+            + weakness_bonus
+        )
+
+        danger = str(
+            battle["danger"] or ""
+        ).strip().casefold()
+
+        if danger == "high":
+            success_chance -= 5
+
+        elif danger == "extreme":
+            success_chance -= 10
+
+        success_chance = max(
+            25,
+            min(
+                85,
+                success_chance
+            )
+        )
+
+    return {
+        "ready": ready,
+        "enemy_hull": enemy_hull,
+        "enemy_max_hull": enemy_max_hull,
+        "required_hull": required_hull,
+        "damage_needed": damage_needed,
+        "success_chance": success_chance,
+    }
+
+
 async def format_battle(guild_id):
 
     battle = await get_active_battle(
@@ -259,7 +341,11 @@ async def format_battle(guild_id):
             "The horizon is clear. No enemy ship is currently engaged."
         )
 
-    return (
+    boarding = get_boarding_status(
+        battle
+    )
+
+    text = (
         "**NAVAL BATTLE**\n"
         "Enemy: **"
         + battle["enemy_name"]
@@ -271,19 +357,135 @@ async def format_battle(guild_id):
         + battle["danger"]
         + "**\n"
         "Enemy Hull: **"
-        + str(battle["enemy_hull"])
+        + str(boarding["enemy_hull"])
         + "/"
-        + str(battle["enemy_max_hull"])
+        + str(boarding["enemy_max_hull"])
         + "**\n\n"
-        "Commands:\n"
+        "**BOARDING STATUS**\n"
+    )
+
+    if boarding["ready"]:
+
+        text += (
+            "Status: **READY**\n"
+            "Boarding Chance: **"
+            + str(boarding["success_chance"])
+            + "%**\n"
+            "Enemy Hull Requirement: **"
+            + str(boarding["required_hull"])
+            + " or lower**"
+        )
+
+    else:
+
+        text += (
+            "Status: **LOCKED**\n"
+            "Required Enemy Hull: **"
+            + str(boarding["required_hull"])
+            + " or lower**\n"
+            "Damage Needed: **"
+            + str(boarding["damage_needed"])
+            + "**"
+        )
+
+    text += (
+        "\n\nCommands:\n"
         "`!c attack` — Fire on the enemy\n"
         "`!c defend` — Brace for incoming fire\n"
-        "`!c board` — Attempt boarding at 35% hull or less\n"
+        "`!c board` — Attempt to capture the enemy vessel\n"
         "`!c flee` — Attempt to escape"
+    )
+
+    return text
+
+
+async def naval_ship_is_operational(
+    guild_id,
+    ship
+):
+    """
+    Defense-in-depth operational check for the naval engine.
+
+    Command handlers already enforce this rule, but the
+    engine also verifies it so direct/internal callers
+    cannot fight with a recovering ship.
+    """
+
+    if not ship_can_fight(ship):
+        return False
+
+    from ship_world import (
+        get_ship_operational_status
+    )
+
+    status = await get_ship_operational_status(
+        guild_id
+    )
+
+    return bool(
+        status["operational"]
     )
 
 
 async def attack_enemy(
+    guild_id,
+    ship
+):
+    """
+    Perform one atomic naval attack for a guild.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _attack_enemy_unlocked(
+            guild_id,
+            ship
+        )
+
+
+async def defend(
+    guild_id,
+    ship=None
+):
+    """
+    Perform one atomic naval defense action.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _defend_unlocked(
+            guild_id,
+            ship=ship
+        )
+
+
+async def board_enemy(
+    guild_id,
+    ship=None
+):
+    """
+    Perform one atomic boarding attempt.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _board_enemy_unlocked(
+            guild_id,
+            ship=ship
+        )
+
+
+async def flee_battle(
+    guild_id
+):
+    """
+    Perform one atomic flee attempt.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _flee_battle_unlocked(
+            guild_id
+        )
+
+
+async def _attack_enemy_unlocked(
     guild_id,
     ship
 ):
@@ -295,7 +497,10 @@ async def attack_enemy(
     if not battle:
         return False, "There is no enemy ship to attack.", None
 
-    if not ship_can_fight(ship):
+    if not await naval_ship_is_operational(
+        guild_id,
+        ship
+    ):
         return (
             False,
             disabled_ship_message(ship),
@@ -421,12 +626,15 @@ async def attack_enemy(
     }
 
 
-async def defend(
+async def _defend_unlocked(
     guild_id,
     ship=None
 ):
 
-    if not ship_can_fight(ship):
+    if not await naval_ship_is_operational(
+        guild_id,
+        ship
+    ):
         return (
             False,
             disabled_ship_message(ship),
@@ -472,7 +680,7 @@ async def defend(
     }
 
 
-async def board_enemy(
+async def _board_enemy_unlocked(
     guild_id,
     ship=None
 ):
@@ -504,35 +712,31 @@ async def board_enemy(
             None
         )
 
-    if not ship_can_fight(ship):
+    if not await naval_ship_is_operational(
+        guild_id,
+        ship
+    ):
         return (
             False,
             disabled_ship_message(ship),
             None
         )
 
-    enemy_hull = int(
-        battle["enemy_hull"]
+    boarding = get_boarding_status(
+        battle
     )
 
-    enemy_max_hull = max(
-        1,
-        int(battle["enemy_max_hull"])
-    )
+    enemy_hull = boarding[
+        "enemy_hull"
+    ]
 
-    hull_percent = (
-        enemy_hull
-        / enemy_max_hull
-    )
+    enemy_max_hull = boarding[
+        "enemy_max_hull"
+    ]
 
     # Boarding is only possible once the target has been
     # sufficiently weakened.
-    if hull_percent > 0.35:
-
-        required_hull = max(
-            1,
-            int(enemy_max_hull * 0.35)
-        )
+    if not boarding["ready"]:
 
         return (
             False,
@@ -541,48 +745,17 @@ async def board_enemy(
                 + battle["enemy_name"]
                 + " is still fighting too strongly.\n\n"
                 "Reduce the enemy to **"
-                + str(required_hull)
-                + " hull or less** before boarding."
+                + str(boarding["required_hull"])
+                + " hull or less** before boarding.\n"
+                "Damage still needed: **"
+                + str(boarding["damage_needed"])
+                + "**."
             ),
             None
         )
 
-    # -----------------------------------------------------
-    # Boarding success chance
-    #
-    # 35% hull = roughly 55%
-    # Near 0% hull = roughly 75%
-    # -----------------------------------------------------
-
-    weakness_bonus = int(
-        (
-            (0.35 - hull_percent)
-            / 0.35
-        )
-        * 20
-    )
-
-    success_chance = (
-        55
-        + weakness_bonus
-    )
-
-    danger = str(
-        battle["danger"] or ""
-    ).strip().casefold()
-
-    if danger == "high":
-        success_chance -= 5
-
-    elif danger == "extreme":
-        success_chance -= 10
-
-    success_chance = max(
-        25,
-        min(
-            85,
-            success_chance
-        )
+    success_chance = int(
+        boarding["success_chance"]
     )
 
     roll = random.randint(
@@ -720,7 +893,7 @@ async def board_enemy(
 
 
 
-async def flee_battle(guild_id):
+async def _flee_battle_unlocked(guild_id):
 
     battle = await get_active_battle(
         guild_id

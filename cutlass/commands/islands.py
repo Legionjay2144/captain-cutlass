@@ -8,6 +8,7 @@ async def handle_island_command(
     *,
     get_ship_settings,
     get_ship,
+    get_ship_operational_status,
     get_active_battle,
     get_active_monster,
     format_island,
@@ -57,10 +58,26 @@ async def handle_island_command(
         message.guild.id
     )
 
-    if int(ship["hull"]) <= 0:
+    operational = await get_ship_operational_status(
+        message.guild.id
+    )
+
+    if not operational["operational"]:
         await message.reply(
-            "**THE SHIP IS DISABLED**\n"
-            "Repair the hull before venturing ashore.",
+            "**SHIP DISABLED / RECOVERING**\n"
+            "The crew cannot venture ashore until the ship reaches **"
+            + str(operational["threshold"])
+            + "/"
+            + str(operational["max_hull"])
+            + " hull**.\n"
+            "Current hull: **"
+            + str(operational["hull"])
+            + "/"
+            + str(operational["max_hull"])
+            + "**.\n"
+            "Needed: **+"
+            + str(operational["needed"])
+            + " hull**.",
             mention_author=False
         )
         return True

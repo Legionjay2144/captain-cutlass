@@ -95,6 +95,7 @@ from ship_world import (
     start_voyage, get_active_voyage, resolve_due_voyages,
     discord_timestamp,
     damage_ship, reward_ship, _reward_ship_unlocked, combat_ship_status,
+    get_ship_operational_status,
     add_ship_treasury, add_ship_supplies,
     add_history as add_ship_history
 )
@@ -134,6 +135,7 @@ from memory import (
 
     ensure_user_profile,
     get_user_profile,
+    update_user_identity,
     add_user_memory,
     get_user_memories,
     get_user_memories_context,
@@ -460,6 +462,22 @@ BRAIN_SCHEMA = {
             "type": "string"
         },
 
+        "gender": {
+            "type": "string"
+        },
+
+        "gender_evidence": {
+            "type": "string"
+        },
+
+        "pronouns": {
+            "type": "string"
+        },
+
+        "pronouns_evidence": {
+            "type": "string"
+        },
+
         "joke_evidence": {
             "type": "string"
         },
@@ -485,6 +503,10 @@ BRAIN_SCHEMA = {
         "reply",
         "lore",
         "memory_evidence",
+        "gender",
+        "gender_evidence",
+        "pronouns",
+        "pronouns_evidence",
         "joke_evidence",
         "event_evidence",
         "server_lore_evidence"
@@ -760,6 +782,38 @@ async def build_member_context(
         )
 
 
+    if profile:
+
+        gender = (
+            profile.get("gender")
+            or "UNKNOWN"
+        )
+
+        pronouns = (
+            profile.get("pronouns")
+            or "UNKNOWN"
+        )
+
+        lines.append(
+            "Member identity:"
+        )
+
+        lines.append(
+            "Gender: "
+            + gender
+        )
+
+        lines.append(
+            "Pronouns: "
+            + pronouns
+        )
+
+        lines.append(
+            "Identity rule: UNKNOWN means use gender-neutral language. "
+            "Never infer missing gender or pronouns."
+        )
+
+
     if memories:
 
         lines.append(
@@ -1012,11 +1066,36 @@ async def resolve_joke_target(message):
 
     content = message.content.strip()
 
+    # Remove Captain's own Discord mention before trying
+    # to interpret ordinary member-target phrasing.
+    if bot.user:
+
+        content = re.sub(
+            rf"<@!?{bot.user.id}>",
+            "",
+            content
+        ).strip()
+
 
     patterns = [
+        # Existing humor targeting.
         r"(?:make|tell|give)\s+(?:me\s+)?(?:a\s+)?joke\s+about\s+(.+?)(?:[?.!]|$)",
         r"(?:joke|roast|tease)\s+(?:about\s+)?(.+?)(?:[?.!]|$)",
         r"make\s+fun\s+of\s+(.+?)(?:[?.!]|$)",
+
+        # Normal conversation about another member.
+        r"(?:say|tell\s+me)\s+(?:something|anything|a\s+few\s+words)\s+about\s+(.+?)(?:[?.!]|$)",
+        r"(?:what\s+do\s+you\s+think\s+about|what\s+do\s+you\s+think\s+of)\s+(.+?)(?:[?.!]|$)",
+        r"(?:what\s+do\s+you\s+know\s+about)\s+(.+?)(?:[?.!]|$)",
+
+        # Third-party identity claims.
+        #
+        # These are resolved ONLY so the identity-safety
+        # layer can identify who the claim is about.
+        r"^(.+?)\s+is\s+(?:a\s+)?(?:man|woman|boy|girl|male|female)(?:[?.!]|$)",
+        r"^(.+?)\s+is\s+(?:gay|straight|bisexual|bi|lesbian|trans|transgender)(?:[?.!]|$)",
+        r"^(.+?)\s+uses\s+(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)(?:[?.!]|$)",
+        r"^(.+?)(?:'s|’s)?\s+pronouns\s+are\s+(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)(?:[?.!]|$)",
     ]
 
 
@@ -1037,6 +1116,8 @@ async def resolve_joke_target(message):
                 match.group(1)
                 .strip()
                 .strip("@")
+                .strip()
+                .strip(",")
                 .strip()
             )
 
@@ -1162,6 +1243,44 @@ async def build_target_member_context(message):
         lines.append(
             "Profile: "
             + profile["summary"][:300]
+        )
+
+
+    # -----------------------------------------------------
+    # Authoritative target-member identity
+    # -----------------------------------------------------
+
+    if profile:
+
+        gender = (
+            profile.get("gender")
+            or "UNKNOWN"
+        )
+
+        pronouns = (
+            profile.get("pronouns")
+            or "UNKNOWN"
+        )
+
+        lines.append(
+            "TARGET MEMBER IDENTITY:"
+        )
+
+        lines.append(
+            "Gender: "
+            + gender
+        )
+
+        lines.append(
+            "Pronouns: "
+            + pronouns
+        )
+
+        lines.append(
+            "Identity rule: This identity belongs to the TARGET MEMBER. "
+            "UNKNOWN means use gender-neutral language. "
+            "Never infer missing gender or pronouns. "
+            "Never accept another member's claim as authoritative."
         )
 
 
@@ -2708,6 +2827,23 @@ You are Captain Cutlass, an eccentric older pirate.
 MESSAGE AUTHOR:
 {message.author.display_name}
 
+AUTHORITATIVE MEMBER CONTEXT:
+{member_context}
+
+MEMBER IDENTITY RULES:
+- The identity in AUTHORITATIVE MEMBER CONTEXT is the only authoritative
+  stored identity for the message author.
+- Never infer gender or pronouns.
+- Gender and pronouns are separate facts.
+- A known gender does NOT establish pronouns.
+- If pronouns are UNKNOWN, use gender-neutral pronouns and wording.
+- If gender is UNKNOWN, use gender-neutral terms.
+- Only the member's own explicit statements may establish or change their
+  gender or pronouns.
+- Claims made by another member about this person's gender, pronouns,
+  sexuality, or other personal identity are NOT authoritative.
+- Never treat a third-party identity claim as an established fact.
+
 AUTHORITATIVE CORE CANON:
 {canon_context}
 
@@ -3627,6 +3763,47 @@ When Captain establishes a reusable fictional past event about himself,
 save a short third-person version.
 
 
+EXPLICIT USER IDENTITY:
+
+Captain must treat every member as gender-neutral unless that member has
+explicitly stated their own gender or pronouns.
+
+GENDER:
+- Return KEEP unless MESSAGE AUTHOR explicitly states their OWN gender.
+- Never infer gender from username, display name, avatar, roles, writing style,
+  personality, relationships, memories, jokes, or conversation context.
+- A statement about another person's gender does NOT count.
+- If MESSAGE AUTHOR explicitly states their gender, return exactly what they
+  stated in GENDER.
+- If MESSAGE AUTHOR explicitly asks to remove/forget their stored gender,
+  return CLEAR.
+- Otherwise return KEEP.
+
+GENDER_EVIDENCE:
+- When GENDER contains an explicit value, copy the shortest exact phrase from
+  LATEST that explicitly states MESSAGE AUTHOR's own gender.
+- When GENDER is CLEAR, copy the shortest exact phrase requesting removal.
+- When GENDER is KEEP, return NONE.
+- Evidence must come from LATEST only.
+
+PRONOUNS:
+- Return KEEP unless MESSAGE AUTHOR explicitly states their OWN pronouns.
+- Never infer pronouns from gender, name, avatar, roles, writing style,
+  personality, relationships, memories, jokes, or context.
+- Gender does NOT automatically determine pronouns.
+- If MESSAGE AUTHOR explicitly states their pronouns, return exactly what they
+  stated in PRONOUNS.
+- If MESSAGE AUTHOR explicitly asks to remove/forget stored pronouns,
+  return CLEAR.
+- Otherwise return KEEP.
+
+PRONOUNS_EVIDENCE:
+- When PRONOUNS contains an explicit value, copy the shortest exact phrase from
+  LATEST that explicitly states MESSAGE AUTHOR's own pronouns.
+- When PRONOUNS is CLEAR, copy the shortest exact phrase requesting removal.
+- When PRONOUNS is KEEP, return NONE.
+- Evidence must come from LATEST only.
+
 PERMANENT MEMORY GROUNDING:
 
 For every proposed permanent write, provide evidence copied from the
@@ -3993,6 +4170,47 @@ def clean_brain_value(
     return value
 
 
+def normalize_member_evidence(
+    message,
+    evidence
+):
+    """
+    Remove an accidental author-name prefix added by the AI.
+
+    Example:
+        bluntie_clause: hello there
+    becomes:
+        hello there
+
+    Only the CURRENT message author's exact username or
+    display name may be stripped.
+    """
+
+    if not evidence:
+        return evidence
+
+    value = str(evidence).strip()
+
+    possible_names = {
+        str(message.author.name or "").strip(),
+        str(message.author.display_name or "").strip()
+    }
+
+    for name in possible_names:
+
+        if not name:
+            continue
+
+        prefix = name + ":"
+
+        if value.casefold().startswith(
+            prefix.casefold()
+        ):
+            return value[len(prefix):].strip()
+
+    return value
+
+
 def evidence_is_grounded(
     message_content,
     evidence
@@ -4020,6 +4238,493 @@ def evidence_is_grounded(
         return False
 
     return proof in source
+
+
+def explicit_identity_evidence_is_valid(
+    message_content,
+    evidence,
+    identity_type
+):
+    """
+    Conservative safety gate for permanent identity writes.
+
+    Identity must be explicitly self-stated in the current
+    message. Never infer identity from names, avatars,
+    behavior, relationships, or surrounding context.
+    """
+
+    if not evidence_is_grounded(
+        message_content,
+        evidence
+    ):
+        return False
+
+    proof = str(
+        evidence or ""
+    ).strip().casefold()
+
+    if not proof:
+        return False
+
+    removal_phrases = (
+        "forget my gender",
+        "remove my gender",
+        "clear my gender",
+        "don't remember my gender",
+        "do not remember my gender",
+        "forget my pronouns",
+        "remove my pronouns",
+        "clear my pronouns",
+        "don't remember my pronouns",
+        "do not remember my pronouns"
+    )
+
+    if identity_type == "gender":
+
+        if any(
+            phrase in proof
+            for phrase in removal_phrases
+            if "gender" in phrase
+        ):
+            return True
+
+        explicit_gender_patterns = (
+            "i am a man",
+            "i'm a man",
+            "im a man",
+            "i am a woman",
+            "i'm a woman",
+            "im a woman",
+            "i am male",
+            "i'm male",
+            "im male",
+            "i am female",
+            "i'm female",
+            "im female",
+            "i identify as a man",
+            "i identify as a woman",
+            "i identify as male",
+            "i identify as female",
+            "i am nonbinary",
+            "i'm nonbinary",
+            "im nonbinary",
+            "i am non-binary",
+            "i'm non-binary",
+            "im non-binary",
+            "i am genderfluid",
+            "i'm genderfluid",
+            "im genderfluid",
+            "i am agender",
+            "i'm agender",
+            "im agender",
+            "my gender is "
+        )
+
+        return any(
+            phrase in proof
+            for phrase in explicit_gender_patterns
+        )
+
+    if identity_type == "pronouns":
+
+        if any(
+            phrase in proof
+            for phrase in removal_phrases
+            if "pronouns" in phrase
+        ):
+            return True
+
+        explicit_pronoun_patterns = (
+            "my pronouns are ",
+            "my pronouns are:",
+            "my pronouns ",
+            "i use he/him",
+            "i use she/her",
+            "i use they/them",
+            "i use he / him",
+            "i use she / her",
+            "i use they / them",
+            "please use he/him",
+            "please use she/her",
+            "please use they/them",
+            "refer to me as he/him",
+            "refer to me as she/her",
+            "refer to me as they/them"
+        )
+
+        return any(
+            phrase in proof
+            for phrase in explicit_pronoun_patterns
+        )
+
+    return False
+
+
+def member_identity_text_is_allowed(
+    text,
+    profile
+):
+    """
+    Prevent permanent member-specific text from inventing
+    gender or pronouns.
+
+    Unknown pronouns = no he/him/she/her assumptions.
+    Explicit pronouns permit only that explicit set.
+    Unknown gender = no man/woman/boy/girl labels.
+    """
+
+    if not text:
+        return True
+
+    value = str(text).casefold()
+
+    import re
+
+    gender = (
+        str(profile.get("gender") or "")
+        .strip()
+        .casefold()
+        if profile
+        else ""
+    )
+
+    pronouns = (
+        str(profile.get("pronouns") or "")
+        .strip()
+        .casefold()
+        if profile
+        else ""
+    )
+
+    has_he = bool(
+        re.search(
+            r"\b(?:he|him|his|himself)\b",
+            value
+        )
+    )
+
+    has_she = bool(
+        re.search(
+            r"\b(?:she|her|hers|herself)\b",
+            value
+        )
+    )
+
+    has_they = bool(
+        re.search(
+            r"\b(?:they|them|their|theirs|themself|themselves)\b",
+            value
+        )
+    )
+
+    # ---------------------------------------------
+    # Pronouns
+    # ---------------------------------------------
+
+    if not pronouns:
+
+        if has_he or has_she:
+            return False
+
+    elif pronouns in (
+        "he/him",
+        "he / him"
+    ):
+
+        if has_she:
+            return False
+
+    elif pronouns in (
+        "she/her",
+        "she / her"
+    ):
+
+        if has_he:
+            return False
+
+    elif pronouns in (
+        "they/them",
+        "they / them"
+    ):
+
+        if has_he or has_she:
+            return False
+
+    else:
+        # Custom or unfamiliar explicitly supplied pronouns.
+        # Do not assume binary pronouns are permitted.
+        if has_he or has_she:
+            return False
+
+    # ---------------------------------------------
+    # Gendered member labels
+    # ---------------------------------------------
+
+    has_man = bool(
+        re.search(r"\bman\b", value)
+    )
+
+    has_woman = bool(
+        re.search(r"\bwoman\b", value)
+    )
+
+    has_boy = bool(
+        re.search(r"\bboy\b", value)
+    )
+
+    has_girl = bool(
+        re.search(r"\bgirl\b", value)
+    )
+
+    if not gender:
+
+        if (
+            has_man
+            or has_woman
+            or has_boy
+            or has_girl
+        ):
+            return False
+
+    elif gender in ("man", "male"):
+
+        if has_woman or has_girl:
+            return False
+
+    elif gender in ("woman", "female"):
+
+        if has_man or has_boy:
+            return False
+
+    else:
+        # For nonbinary/custom genders, do not invent
+        # binary gender labels.
+        if (
+            has_man
+            or has_woman
+            or has_boy
+            or has_girl
+        ):
+            return False
+
+    return True
+
+
+def is_identity_management_message(
+    message_content
+):
+    """
+    Detect first-person identity statements, corrections,
+    removals, and pronoun instructions.
+
+    These belong in identity handling, not ordinary memory.
+    """
+
+    import re
+
+    text = str(
+        message_content or ""
+    ).casefold()
+
+    patterns = (
+        r"\bi(?:\s+am|['’]?m)\s+(?:a\s+)?(?:man|woman|male|female|non[- ]?binary|agender|gender[- ]?fluid)\b",
+        r"\bmy gender is\b",
+        r"\bmy pronouns are\b",
+        r"\bi use\s+(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)\b",
+        r"\bforget my (?:gender|pronouns)\b",
+        r"\bremove my (?:gender|pronouns)\b",
+        r"\bclear my (?:gender|pronouns)\b",
+        r"\bdon['’]?t remember my (?:gender|pronouns)\b",
+        r"\bdo not remember my (?:gender|pronouns)\b",
+        r"\bdon['’]?t call me (?:a\s+)?(?:boy|girl|man|woman|he|him|she|her)\b",
+        r"\bdo not call me (?:a\s+)?(?:boy|girl|man|woman|he|him|she|her)\b",
+        r"\bi(?:['’]?m|\s+am)\s+not\s+(?:a\s+)?(?:boy|girl|man|woman|male|female)\b",
+    )
+
+    return any(
+        re.search(pattern, text)
+        for pattern in patterns
+    )
+
+
+def extract_explicit_user_identity(message_content):
+    """
+    Deterministically extract ONLY explicit first-person
+    gender/pronoun statements from the current Discord message.
+
+    Never infer identity.
+    """
+
+    import re
+
+    source = str(
+        message_content or ""
+    ).strip()
+
+    lowered = source.casefold()
+
+    result = {}
+
+
+    # -----------------------------------------------------
+    # Explicit gender clearing
+    # -----------------------------------------------------
+
+    gender_clear_patterns = (
+        r"\bforget my gender\b",
+        r"\bremove my gender\b",
+        r"\bclear my gender\b",
+        r"\bdon['’]?t remember my gender\b",
+        r"\bdo not remember my gender\b",
+    )
+
+    if any(
+        re.search(pattern, lowered)
+        for pattern in gender_clear_patterns
+    ):
+        result["gender"] = None
+
+
+    # -----------------------------------------------------
+    # Explicit gender statements
+    # -----------------------------------------------------
+
+    gender_patterns = (
+        (
+            r"\bi(?:\s+am|['’]?m)\s+(?:a\s+)?man\b",
+            "man"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+(?:a\s+)?woman\b",
+            "woman"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+male\b",
+            "male"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+female\b",
+            "female"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+non[- ]?binary\b",
+            "nonbinary"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+agender\b",
+            "agender"
+        ),
+        (
+            r"\bi(?:\s+am|['’]?m)\s+gender[- ]?fluid\b",
+            "genderfluid"
+        ),
+    )
+
+    for pattern, value in gender_patterns:
+
+        if re.search(
+            pattern,
+            lowered
+        ):
+            result["gender"] = value
+            break
+
+
+    # "My gender is ..."
+    gender_match = re.search(
+        r"\bmy gender is\s+"
+        r"(man|woman|male|female|non[- ]?binary|agender|gender[- ]?fluid)\b",
+        lowered
+    )
+
+    if gender_match:
+
+        value = gender_match.group(1)
+
+        value = (
+            value
+            .replace("non-binary", "nonbinary")
+            .replace("non binary", "nonbinary")
+            .replace("gender-fluid", "genderfluid")
+            .replace("gender fluid", "genderfluid")
+        )
+
+        result["gender"] = value
+
+
+    # -----------------------------------------------------
+    # Explicit pronoun clearing
+    # -----------------------------------------------------
+
+    pronoun_clear_patterns = (
+        r"\bforget my pronouns\b",
+        r"\bremove my pronouns\b",
+        r"\bclear my pronouns\b",
+        r"\bdon['’]?t remember my pronouns\b",
+        r"\bdo not remember my pronouns\b",
+    )
+
+    if any(
+        re.search(pattern, lowered)
+        for pattern in pronoun_clear_patterns
+    ):
+        result["pronouns"] = None
+
+
+    # -----------------------------------------------------
+    # Explicit pronoun statements
+    # -----------------------------------------------------
+
+    pronoun_patterns = (
+        (
+            r"\bmy pronouns are\s+he\s*/\s*him\b",
+            "he/him"
+        ),
+        (
+            r"\bmy pronouns are\s+she\s*/\s*her\b",
+            "she/her"
+        ),
+        (
+            r"\bmy pronouns are\s+they\s*/\s*them\b",
+            "they/them"
+        ),
+        (
+            r"\bi use\s+he\s*/\s*him\s+pronouns?\b",
+            "he/him"
+        ),
+        (
+            r"\bi use\s+she\s*/\s*her\s+pronouns?\b",
+            "she/her"
+        ),
+        (
+            r"\bi use\s+they\s*/\s*them\s+pronouns?\b",
+            "they/them"
+        ),
+        (
+            r"\bplease use\s+he\s*/\s*him\s+(?:for me|pronouns?)\b",
+            "he/him"
+        ),
+        (
+            r"\bplease use\s+she\s*/\s*her\s+(?:for me|pronouns?)\b",
+            "she/her"
+        ),
+        (
+            r"\bplease use\s+they\s*/\s*them\s+(?:for me|pronouns?)\b",
+            "they/them"
+        ),
+    )
+
+    for pattern, value in pronoun_patterns:
+
+        if re.search(
+            pattern,
+            lowered
+        ):
+            result["pronouns"] = value
+            break
+
+
+    return result
 
 
 async def apply_analysis(
@@ -4182,6 +4887,67 @@ async def apply_analysis(
         )
     )
 
+    gender = clean_brain_value(
+        result.get(
+            "gender",
+            "KEEP"
+        ),
+        "KEEP"
+    )
+
+    gender_evidence = clean_brain_value(
+        result.get(
+            "gender_evidence",
+            "NONE"
+        )
+    )
+
+    pronouns = clean_brain_value(
+        result.get(
+            "pronouns",
+            "KEEP"
+        ),
+        "KEEP"
+    )
+
+    pronouns_evidence = clean_brain_value(
+        result.get(
+            "pronouns_evidence",
+            "NONE"
+        )
+    )
+
+
+    memory_evidence = normalize_member_evidence(
+        message,
+        memory_evidence
+    )
+
+    joke_evidence = normalize_member_evidence(
+        message,
+        joke_evidence
+    )
+
+    event_evidence = normalize_member_evidence(
+        message,
+        event_evidence
+    )
+
+    server_lore_evidence = normalize_member_evidence(
+        message,
+        server_lore_evidence
+    )
+
+    gender_evidence = normalize_member_evidence(
+        message,
+        gender_evidence
+    )
+
+    pronouns_evidence = normalize_member_evidence(
+        message,
+        pronouns_evidence
+    )
+
     message_content = str(
         message.content or ""
     )
@@ -4252,6 +5018,162 @@ async def apply_analysis(
     ):
 
         relationship = None
+
+
+    identity_updates = {}
+
+    # -----------------------------------------------------
+    # Authoritative explicit identity extraction
+    #
+    # The Discord message itself is authoritative.
+    # AI identity fields are secondary only.
+    # -----------------------------------------------------
+
+    explicit_identity = extract_explicit_user_identity(
+        message_content
+    )
+
+    # -----------------------------------------------------
+    # Identity-management messages belong ONLY in the
+    # authoritative identity profile.
+    #
+    # Do not also turn them into memories, jokes, opinions,
+    # nicknames, events, or server lore.
+    # -----------------------------------------------------
+
+    identity_management_message = (
+        bool(explicit_identity)
+        or is_identity_management_message(
+            message_content
+        )
+    )
+
+    if identity_management_message:
+
+        memory = None
+        opinion = None
+        nickname = None
+        joke = None
+        event = None
+        server_lore = None
+
+
+    # -----------------------------------------------------
+    # Third-party target write protection
+    #
+    # apply_analysis() writes member-specific fields using
+    # message.author.id. If the conversation is actually
+    # about another member, those generated facts must NOT
+    # be stored on the author.
+    # -----------------------------------------------------
+
+    analysis_target = await resolve_joke_target(
+        message
+    )
+
+    if (
+        analysis_target is not None
+        and analysis_target.id != message.author.id
+    ):
+
+        if any((
+            memory,
+            opinion,
+            nickname,
+            joke,
+            event
+        )):
+            print(
+                "Suppressed third-party member writes | author:",
+                message.author.id,
+                "| target:",
+                analysis_target.id
+            )
+
+        memory = None
+        opinion = None
+        nickname = None
+        joke = None
+        event = None
+
+    if "gender" in explicit_identity:
+        identity_updates["gender"] = (
+            explicit_identity["gender"]
+        )
+
+    if "pronouns" in explicit_identity:
+        identity_updates["pronouns"] = (
+            explicit_identity["pronouns"]
+        )
+
+
+    # -----------------------------------------------------
+    # Identity is deterministic only.
+    #
+    # AI-generated gender/pronoun fields are ignored.
+    # Only literal first-person statements from the member
+    # may change stored identity.
+    # -----------------------------------------------------
+
+
+    if identity_updates:
+
+        await update_user_identity(
+            message.guild.id,
+            message.author.id,
+            **identity_updates
+        )
+
+
+    # Reload authoritative identity after any explicit
+    # identity change made by this message.
+    identity_profile = await get_user_profile(
+        message.guild.id,
+        message.author.id
+    )
+
+    member_specific_fields = {
+        "memory": memory,
+        "opinion": opinion,
+        "nickname": nickname,
+        "joke": joke,
+        "event": event
+    }
+
+    for field_name, field_value in member_specific_fields.items():
+
+        if not field_value:
+            continue
+
+        if member_identity_text_is_allowed(
+            field_value,
+            identity_profile
+        ):
+            continue
+
+        print(
+            "Blocked identity-assuming permanent write:",
+            field_name,
+            "| user:",
+            message.author.id,
+            "| value:",
+            repr(field_value)
+        )
+
+        if field_name == "memory":
+            memory = None
+
+        elif field_name == "opinion":
+            opinion = None
+
+        elif field_name == "nickname":
+            nickname = None
+
+        elif field_name == "joke":
+            joke = None
+
+        elif field_name == "event":
+            event = None
 
 
     if memory:
@@ -4908,6 +5830,7 @@ async def handle_commands(
         command,
         get_ship_settings=get_ship_settings,
         get_ship=get_ship,
+        get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
         explore_random_island=explore_random_island,
@@ -4926,6 +5849,7 @@ async def handle_commands(
         command,
         get_ship_settings=get_ship_settings,
         get_ship=get_ship,
+        get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
         format_island=format_island,
@@ -4960,6 +5884,7 @@ async def handle_commands(
         command,
         get_ship_settings=get_ship_settings,
         get_ship=get_ship,
+        get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
         get_active_boss=get_active_boss,
@@ -4984,6 +5909,7 @@ async def handle_commands(
         is_admin=is_admin,
         get_ship_settings=get_ship_settings,
         get_ship=get_ship,
+        get_ship_operational_status=get_ship_operational_status,
         start_naval_battle=start_naval_battle,
         get_active_monster=get_active_monster,
         format_battle=format_battle,
@@ -5985,6 +6911,445 @@ async def maybe_parrot_spontaneous(message):
     return True
 
 
+def message_contains_third_party_identity_claim(
+    message_content
+):
+    """
+    Detect common third-party identity claims.
+
+    These claims are never authoritative for another member.
+    """
+
+    import re
+
+    text = str(
+        message_content or ""
+    ).casefold()
+
+    patterns = (
+        r"\bis (?:a )?(?:man|woman|boy|girl|male|female)\b",
+        r"\bis (?:gay|straight|bisexual|bi|lesbian|trans|transgender)\b",
+        r"\buses (?:he/him|she/her|they/them)\b",
+        r"\bpronouns are (?:he/him|she/her|they/them)\b",
+        r"\bcall (?:him|her|them)\b",
+    )
+
+    return any(
+        re.search(pattern, text)
+        for pattern in patterns
+    )
+
+
+def reply_contains_binary_pronouns(
+    reply
+):
+    import re
+
+    text = str(
+        reply or ""
+    )
+
+    # Pronoun-set labels are not themselves references to
+    # somebody in the sentence.
+    text = re.sub(
+        r"\b(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)\b",
+        "",
+        text,
+        flags=re.I
+    )
+
+    return bool(
+        re.search(
+            r"\b(?:he|him|his|himself|she|her|hers|herself)\b",
+            text,
+            re.I
+        )
+    )
+
+
+def profile_allows_binary_reply_pronouns(
+    profile,
+    reply
+):
+    """
+    Check whether binary pronouns appearing in a reply are
+    compatible with explicitly stored pronouns.
+
+    Gender alone never establishes pronouns.
+    """
+
+    import re
+
+    if not reply:
+        return True
+
+    pronouns = (
+        str(
+            (profile or {}).get(
+                "pronouns"
+            )
+            or ""
+        )
+        .strip()
+        .casefold()
+    )
+
+    text = str(
+        reply
+    ).casefold()
+
+    # Ignore literal pronoun-set labels such as "he/him".
+    # They are not equivalent to referring to somebody as he.
+    text = re.sub(
+        r"\b(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)\b",
+        "",
+        text,
+        flags=re.I
+    )
+
+    has_he = bool(
+        re.search(
+            r"\b(?:he|him|his|himself)\b",
+            text
+        )
+    )
+
+    has_she = bool(
+        re.search(
+            r"\b(?:she|her|hers|herself)\b",
+            text
+        )
+    )
+
+    if not pronouns:
+        return not (
+            has_he
+            or has_she
+        )
+
+    if pronouns in (
+        "he/him",
+        "he / him"
+    ):
+        return not has_she
+
+    if pronouns in (
+        "she/her",
+        "she / her"
+    ):
+        return not has_he
+
+    if pronouns in (
+        "they/them",
+        "they / them"
+    ):
+        return not (
+            has_he
+            or has_she
+        )
+
+    # Unknown/custom explicit pronoun sets must not silently
+    # authorize binary pronouns.
+    return not (
+        has_he
+        or has_she
+    )
+
+
+async def enforce_reply_identity_safety(
+    message,
+    reply
+):
+    """
+    Final identity safety boundary before Captain's reply
+    reaches Discord.
+
+    Prompt rules remain the first defense. This function is
+    the last defense.
+    """
+
+    if not reply:
+        return reply
+
+    author_profile = await get_user_profile(
+        message.guild.id,
+        message.author.id
+    )
+
+    target = await resolve_joke_target(
+        message
+    )
+
+    target_profile = None
+
+    if (
+        target is not None
+        and target.id != message.author.id
+    ):
+        target_profile = await get_user_profile(
+            message.guild.id,
+            target.id
+        )
+
+    # -----------------------------------------------------
+    # Third-party identity claims
+    # -----------------------------------------------------
+
+    if (
+        target is not None
+        and target.id != message.author.id
+        and message_contains_third_party_identity_claim(
+            message.content
+        )
+    ):
+        return (
+            "Aye, I don't take another crewmate's word as proof of "
+            + target.display_name
+            + "'s identity, matey. If they want me to remember "
+            "something about themselves, they can tell me directly."
+        )
+
+    # -----------------------------------------------------
+    # Determine whether a rewrite is required.
+    # -----------------------------------------------------
+
+    unsafe = False
+
+    if reply_contains_binary_pronouns(
+        reply
+    ):
+
+        if (
+            target_profile is not None
+            and not profile_allows_binary_reply_pronouns(
+                target_profile,
+                reply
+            )
+        ):
+            unsafe = True
+
+        elif (
+            target is None
+            and not profile_allows_binary_reply_pronouns(
+                author_profile,
+                reply
+            )
+        ):
+            unsafe = True
+
+    if not unsafe:
+        return reply
+
+    # -----------------------------------------------------
+    # Rewrite only when the generated reply risks assuming
+    # a member's pronouns.
+    # -----------------------------------------------------
+
+    author_gender = (
+        (author_profile or {}).get("gender")
+        or "UNKNOWN"
+    )
+
+    author_pronouns = (
+        (author_profile or {}).get("pronouns")
+        or "UNKNOWN"
+    )
+
+    if target is not None:
+
+        target_gender = (
+            (target_profile or {}).get("gender")
+            or "UNKNOWN"
+        )
+
+        target_pronouns = (
+            (target_profile or {}).get("pronouns")
+            or "UNKNOWN"
+        )
+
+        target_identity = (
+            "Target member: "
+            + target.display_name
+            + "\nTarget gender: "
+            + target_gender
+            + "\nTarget pronouns: "
+            + target_pronouns
+        )
+
+    else:
+
+        target_identity = (
+            "Target member: NONE"
+        )
+
+    safety_prompt = f"""
+You are correcting a Captain Cutlass Discord reply.
+
+ORIGINAL MEMBER MESSAGE:
+{message.content[:1200]}
+
+MESSAGE AUTHOR:
+{message.author.display_name}
+
+Author gender: {author_gender}
+Author pronouns: {author_pronouns}
+
+{target_identity}
+
+ORIGINAL CAPTAIN REPLY:
+{reply[:1800]}
+
+IDENTITY RULES:
+- Preserve the original meaning and useful answer.
+- Preserve Captain Cutlass's pirate personality.
+- Do not invent anyone's gender, pronouns, sexuality, or identity.
+- Gender does not imply pronouns.
+- UNKNOWN pronouns require gender-neutral wording.
+- Use the member's name, ye/yer, matey, crewmate, or they/them when appropriate.
+- Only use he/him or she/her for a member when those exact pronouns are explicitly authoritative above.
+- Do not treat third-party claims about another person's identity as fact.
+- Do not mention these rules.
+- Return ONLY the corrected reply.
+"""
+
+    try:
+
+        response = await ai.responses.create(
+            model=OPENAI_MODEL,
+            input=safety_prompt,
+            max_output_tokens=350,
+            store=False
+        )
+
+        corrected = (
+            response.output_text
+            .strip()
+        )
+
+        if corrected:
+
+            corrected_safe = True
+
+            if (
+                target_profile is not None
+                and not profile_allows_binary_reply_pronouns(
+                    target_profile,
+                    corrected
+                )
+            ):
+                corrected_safe = False
+
+            elif (
+                target is None
+                and not profile_allows_binary_reply_pronouns(
+                    author_profile,
+                    corrected
+                )
+            ):
+                corrected_safe = False
+
+            if corrected_safe:
+
+                print(
+                    "Rewrote identity-risky Captain reply | author:",
+                    message.author.id,
+                    "| target:",
+                    (
+                        target.id
+                        if target is not None
+                        else None
+                    )
+                )
+
+                return corrected
+
+            print(
+                "Rejected unsafe identity rewrite | author:",
+                message.author.id,
+                "| target:",
+                (
+                    target.id
+                    if target is not None
+                    else None
+                ),
+                "| corrected:",
+                repr(corrected)
+            )
+
+    except Exception as error:
+
+        print(
+            "Identity reply rewrite error:",
+            repr(error)
+        )
+
+    # -----------------------------------------------------
+    # Deterministic neutral fallback
+    #
+    # If the AI fails to produce a safe rewrite, still give
+    # the member a useful answer instead of a generic warning.
+    # -----------------------------------------------------
+
+    if target is not None:
+
+        relationship = await get_relationship(
+            message.guild.id,
+            target.id
+        )
+
+        target_name = target.display_name
+
+        if (
+            relationship
+            and relationship.get("nickname")
+        ):
+            target_name = relationship["nickname"]
+
+        familiarity = 0
+
+        if relationship:
+            familiarity = int(
+                relationship.get(
+                    "familiarity",
+                    0
+                )
+                or 0
+            )
+
+        if familiarity >= 75:
+
+            return (
+                "Aye, "
+                + target_name
+                + " be a well-known crewmate around these decks. "
+                "Plenty of history with this old captain, plenty of "
+                "banter, and enough mischief to keep the watch busy, matey."
+            )
+
+        if familiarity >= 40:
+
+            return (
+                "Aye, "
+                + target_name
+                + " be a familiar crewmate around here. "
+                "We've shared enough laughs and adventures to keep "
+                "this old pirate entertained, matey."
+            )
+
+        return (
+            "Aye, "
+            + target_name
+            + " be one of the crew, and I'm still learnin' "
+            "what sort of trouble follows that name around the ship, matey."
+        )
+
+    # No separate target exists. Use a neutral direct-response fallback.
+    return (
+        "Aye, matey. I heard ye. I'll stick to what ye actually told "
+        "me and won't go inventin' anything about yer identity."
+    )
+
+
 @bot.event
 async def on_message(
     message
@@ -6323,6 +7688,17 @@ async def on_message(
                 "reply",
                 "NONE"
             )
+        )
+
+
+        if not reply:
+
+            return
+
+
+        reply = await enforce_reply_identity_safety(
+            message,
+            reply
         )
 
 
