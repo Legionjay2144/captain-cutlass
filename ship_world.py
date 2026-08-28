@@ -107,6 +107,154 @@ async def _db():
     return db
 
 
+
+# =========================================================
+# SHIP COMBAT ABILITIES
+# =========================================================
+
+SHIP_COMBAT_ABILITIES = {
+
+    "brace": {
+        "name": "Brace for Impact",
+        "cooldown": 3,
+        "description": (
+            "Reduce the next incoming combat hit by 50%."
+        ),
+    },
+
+    "broadside": {
+        "name": "Full Broadside",
+        "cooldown": 3,
+        "description": (
+            "Increase the next outgoing combat attack by 50%."
+        ),
+    },
+
+    "repairs": {
+        "name": "Emergency Repairs",
+        "cooldown": 4,
+        "description": (
+            "Restore 10% of maximum hull during combat."
+        ),
+    },
+
+    "rally": {
+        "name": "Rally the Crew",
+        "cooldown": 4,
+        "description": (
+            "Increase the next outgoing attack by 25% "
+            "and reduce the next incoming hit by 25%."
+        ),
+    },
+}
+
+
+SHIP_ABILITY_ALIASES = {
+    "brace": "brace",
+    "brace for impact": "brace",
+    "broadside": "broadside",
+    "full broadside": "broadside",
+    "repairs": "repairs",
+    "repair": "repairs",
+    "emergency repairs": "repairs",
+    "rally": "rally",
+    "rally the crew": "rally",
+}
+
+
+def normalize_ship_ability(raw_name):
+
+    key = " ".join(
+        str(
+            raw_name or ""
+        ).lower().split()
+    )
+
+    return SHIP_ABILITY_ALIASES.get(
+        key
+    )
+
+
+def get_ship_ability_info(raw_name):
+
+    key = normalize_ship_ability(
+        raw_name
+    )
+
+    if not key:
+        return None
+
+    info = dict(
+        SHIP_COMBAT_ABILITIES[key]
+    )
+
+    info["key"] = key
+
+    return info
+
+
+def apply_ship_outgoing_ability(
+    damage,
+    *,
+    broadside=False,
+    rally=False,
+):
+
+    damage = max(
+        0,
+        int(damage)
+    )
+
+    multiplier = 1.0
+
+    if broadside:
+        multiplier *= 1.50
+
+    if rally:
+        multiplier *= 1.25
+
+    if damage <= 0:
+        return 0
+
+    return max(
+        1,
+        round(
+            damage * multiplier
+        )
+    )
+
+
+def apply_ship_incoming_ability(
+    damage,
+    *,
+    brace=False,
+    rally=False,
+):
+
+    damage = max(
+        0,
+        int(damage)
+    )
+
+    multiplier = 1.0
+
+    if brace:
+        multiplier *= 0.50
+
+    if rally:
+        multiplier *= 0.75
+
+    if damage <= 0:
+        return 0
+
+    return max(
+        1,
+        round(
+            damage * multiplier
+        )
+    )
+
+
 async def initialize_ship_world():
     db = await _db()
     try:
@@ -172,7 +320,59 @@ async def initialize_ship_world():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, user_id)
         );
+
+        CREATE TABLE IF NOT EXISTS ship_contribution_rewards (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            milestone INTEGER NOT NULL,
+            reward INTEGER NOT NULL,
+            claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            paid_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (
+                guild_id,
+                user_id,
+                milestone
+            )
+        );
+
+        CREATE TABLE IF NOT EXISTS ship_combat_abilities (
+            guild_id INTEGER NOT NULL,
+            ability_key TEXT NOT NULL,
+            cooldown_turns INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 0,
+            activated_by INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, ability_key)
+        );
         """)
+
+        # -------------------------------------------------
+        # Contribution reward paid_at migration
+        # -------------------------------------------------
+
+        reward_columns = await (
+            await db.execute(
+                """
+                PRAGMA table_info(
+                    ship_contribution_rewards
+                )
+                """
+            )
+        ).fetchall()
+
+        reward_column_names = {
+            row["name"]
+            for row in reward_columns
+        }
+
+        if "paid_at" not in reward_column_names:
+            await db.execute(
+                """
+                ALTER TABLE ship_contribution_rewards
+                ADD COLUMN paid_at DATETIME DEFAULT NULL
+                """
+            )
+
         # -------------------------------------------------
         # Disabled ship passive-recovery migration
         # -------------------------------------------------
@@ -743,6 +943,56 @@ async def rename_ship(guild_id, name):
     return name
 
 
+SHIP_CONTRIBUTION_MILESTONES = (
+    (100, 25),
+    (250, 50),
+    (500, 100),
+    (1000, 200),
+    (2500, 400),
+    (5000, 750),
+    (10000, 1250),
+)
+
+
+def contribution_milestones_crossed(
+    previous_total,
+    new_total,
+):
+    """
+    Return contribution milestones crossed between
+    two cumulative contribution totals.
+
+    Each result is:
+        {
+            "milestone": int,
+            "reward": int,
+        }
+    """
+
+    previous_total = max(
+        0,
+        int(previous_total)
+    )
+
+    new_total = max(
+        0,
+        int(new_total)
+    )
+
+    return [
+        {
+            "milestone": milestone,
+            "reward": reward,
+        }
+        for milestone, reward
+        in SHIP_CONTRIBUTION_MILESTONES
+        if (
+            previous_total < milestone
+            <= new_total
+        )
+    ]
+
+
 async def donate(
     guild_id,
     user_id,
@@ -799,6 +1049,29 @@ async def donate(
                 )
             )
 
+            contribution_row = await (
+                await db.execute(
+                    """
+                    SELECT amount
+                    FROM ship_contributions
+                    WHERE guild_id = ?
+                      AND user_id = ?
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                    )
+                )
+            ).fetchone()
+
+            previous_contribution = (
+                int(
+                    contribution_row["amount"]
+                )
+                if contribution_row
+                else 0
+            )
+
             await db.execute(
                 """
                 INSERT INTO ship_contributions (
@@ -822,6 +1095,11 @@ async def donate(
                 )
             )
 
+            new_contribution = (
+                previous_contribution
+                + amount
+            )
+
             await db.commit()
 
         finally:
@@ -839,14 +1117,279 @@ async def donate(
             "donation"
         )
 
+        await claim_contribution_milestones(
+            guild_id,
+            user_id,
+            previous_contribution,
+            new_contribution,
+        )
+
+        pending_milestones = (
+            await get_pending_contribution_rewards(
+                guild_id,
+                user_id,
+            )
+        )
+
+        paid_milestones = []
+        pending_reward_total = 0
+
+        if pending_milestones:
+
+            pending_reward_total = sum(
+                int(item["reward"])
+                for item in pending_milestones
+            )
+
+            try:
+                await change_balance(
+                    guild_id,
+                    user_id,
+                    pending_reward_total,
+                )
+
+                await mark_contribution_rewards_paid(
+                    guild_id,
+                    user_id,
+                    pending_milestones,
+                )
+
+                paid_milestones = (
+                    pending_milestones
+                )
+
+                pending_reward_total = 0
+
+            except Exception as exc:
+                print(
+                    "Contribution milestone payout "
+                    "deferred:",
+                    repr(exc),
+                )
+
         return (
             True,
             "**"
             + username
             + "** donated **"
             + str(amount)
-            + " doubloons** to the ship treasury."
+            + " doubloons** to the ship treasury.",
+            paid_milestones,
+            pending_reward_total,
         )
+
+
+async def claim_contribution_milestones(
+    guild_id,
+    user_id,
+    previous_total,
+    new_total,
+):
+    """
+    Atomically claim newly crossed contribution milestones.
+
+    The PRIMARY KEY prevents a milestone from being claimed
+    more than once for the same guild/member.
+
+    Returns only milestones successfully claimed now.
+    """
+
+    candidates = contribution_milestones_crossed(
+        previous_total,
+        new_total,
+    )
+
+    if not candidates:
+        return []
+
+    db = await _db()
+
+    claimed = []
+
+    try:
+
+        for item in candidates:
+
+            cursor = await db.execute(
+                """
+                INSERT OR IGNORE INTO ship_contribution_rewards (
+                    guild_id,
+                    user_id,
+                    milestone,
+                    reward
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    guild_id,
+                    user_id,
+                    item["milestone"],
+                    item["reward"],
+                )
+            )
+
+            if cursor.rowcount == 1:
+                claimed.append(
+                    dict(item)
+                )
+
+        await db.commit()
+
+        return claimed
+
+    finally:
+        await db.close()
+
+
+async def get_contribution_rewards(
+    guild_id,
+    user_id,
+):
+    """
+    Return contribution milestones already claimed by a
+    guild member.
+    """
+
+    db = await _db()
+
+    try:
+        rows = await (
+            await db.execute(
+                """
+                SELECT
+                    milestone,
+                    reward,
+                    claimed_at
+                FROM ship_contribution_rewards
+                WHERE guild_id = ?
+                  AND user_id = ?
+                ORDER BY milestone
+                """,
+                (
+                    guild_id,
+                    user_id,
+                )
+            )
+        ).fetchall()
+
+        return [
+            {
+                "milestone": int(
+                    row["milestone"]
+                ),
+                "reward": int(
+                    row["reward"]
+                ),
+                "claimed_at": row[
+                    "claimed_at"
+                ],
+            }
+            for row in rows
+        ]
+
+    finally:
+        await db.close()
+
+
+async def get_pending_contribution_rewards(
+    guild_id,
+    user_id,
+):
+    """
+    Return milestone rewards which have been earned but
+    have not yet been successfully credited to the member.
+    """
+
+    db = await _db()
+
+    try:
+        rows = await (
+            await db.execute(
+                """
+                SELECT
+                    milestone,
+                    reward
+                FROM ship_contribution_rewards
+                WHERE guild_id = ?
+                  AND user_id = ?
+                  AND paid_at IS NULL
+                ORDER BY milestone
+                """,
+                (
+                    guild_id,
+                    user_id,
+                )
+            )
+        ).fetchall()
+
+        return [
+            {
+                "milestone": int(
+                    row["milestone"]
+                ),
+                "reward": int(
+                    row["reward"]
+                ),
+            }
+            for row in rows
+        ]
+
+    finally:
+        await db.close()
+
+
+async def mark_contribution_rewards_paid(
+    guild_id,
+    user_id,
+    milestones,
+):
+    """
+    Mark successfully credited milestone rewards paid.
+    """
+
+    milestone_values = sorted(
+        {
+            int(item["milestone"])
+            for item in milestones
+        }
+    )
+
+    if not milestone_values:
+        return 0
+
+    placeholders = ",".join(
+        "?"
+        for _ in milestone_values
+    )
+
+    db = await _db()
+
+    try:
+        cursor = await db.execute(
+            f"""
+            UPDATE ship_contribution_rewards
+            SET paid_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND paid_at IS NULL
+              AND milestone IN ({placeholders})
+            """,
+            (
+                guild_id,
+                user_id,
+                *milestone_values,
+            )
+        )
+
+        await db.commit()
+
+        return max(
+            0,
+            int(cursor.rowcount)
+        )
+
+    finally:
+        await db.close()
 
 
 async def top_contributors(guild_id, limit=5):
@@ -2186,6 +2729,711 @@ async def reward_ship(
             xp_reward=xp_reward
         )
 
+
+
+
+async def ensure_ship_combat_abilities(
+    guild_id
+):
+
+    await ensure_ship(
+        guild_id
+    )
+
+    db = await _db()
+
+    try:
+
+        for ability_key in SHIP_COMBAT_ABILITIES:
+
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO ship_combat_abilities (
+                    guild_id,
+                    ability_key
+                )
+                VALUES (?, ?)
+                """,
+                (
+                    guild_id,
+                    ability_key,
+                )
+            )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+
+async def get_ship_combat_abilities(
+    guild_id
+):
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    db = await _db()
+
+    try:
+
+        rows = await (
+            await db.execute(
+                """
+                SELECT
+                    ability_key,
+                    cooldown_turns,
+                    active,
+                    activated_by
+                FROM ship_combat_abilities
+                WHERE guild_id = ?
+                """,
+                (
+                    guild_id,
+                )
+            )
+        ).fetchall()
+
+        result = {}
+
+        for row in rows:
+
+            key = row["ability_key"]
+
+            if key not in SHIP_COMBAT_ABILITIES:
+                continue
+
+            result[key] = {
+                "key": key,
+                "name": (
+                    SHIP_COMBAT_ABILITIES[
+                        key
+                    ]["name"]
+                ),
+                "cooldown_turns": max(
+                    0,
+                    int(
+                        row[
+                            "cooldown_turns"
+                        ]
+                    )
+                ),
+                "active": bool(
+                    row["active"]
+                ),
+                "activated_by": int(
+                    row["activated_by"]
+                    or 0
+                ),
+            }
+
+        return result
+
+    finally:
+        await db.close()
+
+
+async def activate_ship_combat_ability(
+    guild_id,
+    raw_name,
+    *,
+    user_id=0,
+):
+
+    key = normalize_ship_ability(
+        raw_name
+    )
+
+    if not key:
+
+        return (
+            False,
+            "Unknown ship combat ability.",
+            None,
+        )
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    info = SHIP_COMBAT_ABILITIES[
+        key
+    ]
+
+    db = await _db()
+
+    try:
+
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    cooldown_turns,
+                    active
+                FROM ship_combat_abilities
+                WHERE guild_id = ?
+                  AND ability_key = ?
+                """,
+                (
+                    guild_id,
+                    key,
+                )
+            )
+        ).fetchone()
+
+        cooldown = max(
+            0,
+            int(
+                row["cooldown_turns"]
+            )
+        )
+
+        active = bool(
+            row["active"]
+        )
+
+        if active:
+
+            return (
+                False,
+                "**"
+                + info["name"]
+                + "** is already active.",
+                None,
+            )
+
+        if cooldown > 0:
+
+            return (
+                False,
+                "**"
+                + info["name"]
+                + "** is on cooldown for **"
+                + str(cooldown)
+                + " more combat turn"
+                + (
+                    ""
+                    if cooldown == 1
+                    else "s"
+                )
+                + "**.",
+                None,
+            )
+
+        cursor = await db.execute(
+            """
+            UPDATE ship_combat_abilities
+            SET active = 1,
+                cooldown_turns = ?,
+                activated_by = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND ability_key = ?
+              AND active = 0
+              AND cooldown_turns = 0
+            """,
+            (
+                int(
+                    info["cooldown"]
+                ),
+                int(user_id or 0),
+                guild_id,
+                key,
+            )
+        )
+
+        if cursor.rowcount != 1:
+
+            await db.rollback()
+
+            return (
+                False,
+                "That ability is no longer available.",
+                None,
+            )
+
+        await db.commit()
+
+        return (
+            True,
+            "**"
+            + info["name"].upper()
+            + "**\n"
+            + info["description"],
+            {
+                "key": key,
+                "name": info["name"],
+                "cooldown": int(
+                    info["cooldown"]
+                ),
+            },
+        )
+
+    finally:
+        await db.close()
+
+
+
+async def activate_emergency_repairs(
+    guild_id,
+    *,
+    user_id=0,
+):
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    operational = await get_ship_operational_status(
+        guild_id
+    )
+
+    if not operational["operational"]:
+
+        return (
+            False,
+            "**Emergency Repairs** cannot revive a disabled ship.",
+            None,
+        )
+
+    db = await _db()
+
+    try:
+
+        row = await (
+            await db.execute(
+                """
+                SELECT cooldown_turns
+                FROM ship_combat_abilities
+                WHERE guild_id = ?
+                  AND ability_key = 'repairs'
+                """,
+                (
+                    guild_id,
+                )
+            )
+        ).fetchone()
+
+        cooldown = max(
+            0,
+            int(
+                row["cooldown_turns"]
+            )
+        )
+
+        if cooldown > 0:
+
+            return (
+                False,
+                "**Emergency Repairs** is on cooldown for **"
+                + str(cooldown)
+                + " more combat turn"
+                + (
+                    ""
+                    if cooldown == 1
+                    else "s"
+                )
+                + "**.",
+                None,
+            )
+
+        ship = await (
+            await db.execute(
+                """
+                SELECT hull
+                FROM ships
+                WHERE guild_id = ?
+                """,
+                (
+                    guild_id,
+                )
+            )
+        ).fetchone()
+
+        if not ship:
+
+            return (
+                False,
+                "The Living Ship could not be found.",
+                None,
+            )
+
+        old_hull = max(
+            0,
+            int(ship["hull"])
+        )
+
+        upgrades = await get_upgrade_levels(
+            guild_id
+        )
+
+        max_hull = max(
+            1,
+            int(
+                ship_caps(
+                    upgrades
+                )["hull"]
+            )
+        )
+
+        if old_hull >= max_hull:
+
+            return (
+                False,
+                "**Emergency Repairs** are not needed; "
+                "the hull is already at full strength.",
+                None,
+            )
+
+        repair_amount = max(
+            1,
+            round(
+                max_hull * 0.10
+            )
+        )
+
+        new_hull = min(
+            max_hull,
+            old_hull + repair_amount
+        )
+
+        actual_repair = (
+            new_hull - old_hull
+        )
+
+        cursor = await db.execute(
+            """
+            UPDATE ship_combat_abilities
+            SET active = 0,
+                cooldown_turns = ?,
+                activated_by = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND ability_key = 'repairs'
+              AND active = 0
+              AND cooldown_turns = 0
+            """,
+            (
+                int(
+                    SHIP_COMBAT_ABILITIES[
+                        "repairs"
+                    ]["cooldown"]
+                ),
+                int(user_id or 0),
+                guild_id,
+            )
+        )
+
+        if cursor.rowcount != 1:
+
+            await db.rollback()
+
+            return (
+                False,
+                "Emergency Repairs are no longer available.",
+                None,
+            )
+
+        await db.execute(
+            """
+            UPDATE ships
+            SET hull = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (
+                new_hull,
+                guild_id,
+            )
+        )
+
+        await db.commit()
+
+        return (
+            True,
+            "**EMERGENCY REPAIRS**\n"
+            "Damage-control crews restore **"
+            + str(actual_repair)
+            + " hull**.\n"
+            "Hull: **"
+            + str(new_hull)
+            + "/"
+            + str(max_hull)
+            + "**.",
+            {
+                "key": "repairs",
+                "name": "Emergency Repairs",
+                "repaired": actual_repair,
+                "old_hull": old_hull,
+                "new_hull": new_hull,
+                "max_hull": max_hull,
+                "cooldown": int(
+                    SHIP_COMBAT_ABILITIES[
+                        "repairs"
+                    ]["cooldown"]
+                ),
+            },
+        )
+
+    finally:
+        await db.close()
+
+
+async def consume_ship_combat_effects(
+    guild_id,
+    *,
+    outgoing=False,
+    incoming=False,
+):
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    db = await _db()
+
+    consumed = {
+        "broadside": False,
+        "brace": False,
+        "rally_outgoing": False,
+        "rally_incoming": False,
+    }
+
+    try:
+
+        rows = await (
+            await db.execute(
+                """
+                SELECT
+                    ability_key,
+                    active
+                FROM ship_combat_abilities
+                WHERE guild_id = ?
+                """,
+                (
+                    guild_id,
+                )
+            )
+        ).fetchall()
+
+        active = {
+            row["ability_key"]:
+                bool(row["active"])
+            for row in rows
+        }
+
+        if (
+            outgoing
+            and active.get(
+                "broadside",
+                False
+            )
+        ):
+
+            cursor = await db.execute(
+                """
+                UPDATE ship_combat_abilities
+                SET active = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                  AND ability_key = 'broadside'
+                  AND active = 1
+                """,
+                (
+                    guild_id,
+                )
+            )
+
+            consumed["broadside"] = (
+                cursor.rowcount == 1
+            )
+
+        if (
+            incoming
+            and active.get(
+                "brace",
+                False
+            )
+        ):
+
+            cursor = await db.execute(
+                """
+                UPDATE ship_combat_abilities
+                SET active = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                  AND ability_key = 'brace'
+                  AND active = 1
+                """,
+                (
+                    guild_id,
+                )
+            )
+
+            consumed["brace"] = (
+                cursor.rowcount == 1
+            )
+
+        if active.get(
+            "rally",
+            False
+        ):
+
+            # Rally is consumed by the first combat exchange
+            # that requests either side of the effect.
+            if outgoing or incoming:
+
+                cursor = await db.execute(
+                    """
+                    UPDATE ship_combat_abilities
+                    SET active = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = ?
+                      AND ability_key = 'rally'
+                      AND active = 1
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+
+                if cursor.rowcount == 1:
+
+                    consumed[
+                        "rally_outgoing"
+                    ] = bool(outgoing)
+
+                    consumed[
+                        "rally_incoming"
+                    ] = bool(incoming)
+
+        await db.commit()
+
+        return consumed
+
+    finally:
+        await db.close()
+
+
+async def consume_ship_combat_ability(
+    guild_id,
+    raw_name,
+):
+    """
+    Consume exactly one armed ship combat ability.
+
+    Cooldown is intentionally preserved.
+    """
+
+    ability_key = normalize_ship_ability(
+        raw_name
+    )
+
+    if not ability_key:
+        return False
+
+    db = await _db()
+
+    try:
+
+        cursor = await db.execute(
+            """
+            UPDATE ship_combat_abilities
+            SET
+                active = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND ability_key = ?
+              AND active = 1
+            """,
+            (
+                guild_id,
+                ability_key,
+            )
+        )
+
+        changed = (
+            cursor.rowcount == 1
+        )
+
+        await db.commit()
+
+        return changed
+
+    finally:
+        await db.close()
+
+
+async def advance_ship_ability_cooldowns(
+    guild_id
+):
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    db = await _db()
+
+    try:
+
+        await db.execute(
+            """
+            UPDATE ship_combat_abilities
+            SET cooldown_turns =
+                CASE
+                    WHEN cooldown_turns > 0
+                    THEN cooldown_turns - 1
+                    ELSE 0
+                END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND active = 0
+              AND cooldown_turns > 0
+            """,
+            (
+                guild_id,
+            )
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    return await get_ship_combat_abilities(
+        guild_id
+    )
+
+
+async def clear_ship_combat_effects(
+    guild_id
+):
+
+    await ensure_ship_combat_abilities(
+        guild_id
+    )
+
+    db = await _db()
+
+    try:
+
+        await db.execute(
+            """
+            UPDATE ship_combat_abilities
+            SET active = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+            """,
+            (
+                guild_id,
+            )
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
 
 
 async def combat_ship_status(guild_id):

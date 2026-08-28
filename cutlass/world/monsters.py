@@ -254,6 +254,79 @@ async def start_monster_encounter(
         )
 
 
+async def force_withdraw_monster(guild_id):
+    """
+    Terminate the active monster encounter because the Living
+    Ship became non-operational.
+
+    The monster is not recorded as defeated and no rewards are
+    generated here.
+    """
+
+    db = await _db()
+
+    try:
+        encounter = await (
+            await db.execute(
+                """
+                SELECT *
+                FROM monster_encounters
+                WHERE guild_id = ?
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (guild_id,),
+            )
+        ).fetchone()
+
+        if not encounter:
+            return False, None
+
+        cursor = await db.execute(
+            """
+            UPDATE monster_encounters
+            SET status = 'player_disabled',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status = 'active'
+            """,
+            (encounter["id"],),
+        )
+
+        changed = cursor.rowcount == 1
+
+        if changed:
+            await db.execute(
+                """
+                INSERT INTO monster_events (
+                    encounter_id,
+                    guild_id,
+                    action,
+                    description
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    encounter["id"],
+                    guild_id,
+                    "player_disabled",
+                    (
+                        "The Living Ship became non-operational. "
+                        "The crew was forced to withdraw from "
+                        + encounter["name"]
+                        + "; the creature remained undefeated."
+                    ),
+                ),
+            )
+
+        await db.commit()
+
+        return changed, dict(encounter)
+
+    finally:
+        await db.close()
+
 async def format_monster(guild_id):
 
     encounter = await get_active_monster(
@@ -287,9 +360,363 @@ async def format_monster(guild_id):
     )
 
 
+
+# =========================================================
+# MONSTER COMBAT PHASES
+# =========================================================
+
+MONSTER_PHASES = {
+
+    "kraken": {
+        1: {
+            "name": "The Hunt",
+            "enemy_damage_mult": 1.00,
+            "player_damage_mult": 1.00,
+        },
+        2: {
+            "name": "Thrashing Tentacles",
+            "enemy_damage_mult": 1.15,
+            "player_damage_mult": 1.00,
+        },
+        3: {
+            "name": "Frenzy",
+            "enemy_damage_mult": 1.30,
+            "player_damage_mult": 1.00,
+        },
+    },
+
+    "leviathan": {
+        1: {
+            "name": "Surface Assault",
+            "enemy_damage_mult": 1.00,
+            "player_damage_mult": 1.00,
+        },
+        2: {
+            "name": "The Dive",
+            "enemy_damage_mult": 1.10,
+            "player_damage_mult": 0.75,
+        },
+        3: {
+            "name": "Leviathan's Rage",
+            "enemy_damage_mult": 1.35,
+            "player_damage_mult": 1.00,
+        },
+    },
+
+    "drowned_king": {
+        1: {
+            "name": "The Fallen King",
+            "enemy_damage_mult": 1.00,
+            "player_damage_mult": 1.00,
+        },
+        2: {
+            "name": "Call of the Deep",
+            "enemy_damage_mult": 1.20,
+            "player_damage_mult": 1.00,
+        },
+        3: {
+            "name": "Drowned Wrath",
+            "enemy_damage_mult": 1.45,
+            "player_damage_mult": 1.00,
+        },
+    },
+}
+
+
+def calculate_monster_phase(
+    hp,
+    max_hp,
+):
+    """
+    Determine monster phase from remaining HP.
+
+    Phase 1: above 65%
+    Phase 2: 31-65%
+    Phase 3: 30% or below
+    """
+
+    max_hp = max(
+        1,
+        int(max_hp)
+    )
+
+    hp = max(
+        0,
+        int(hp)
+    )
+
+    ratio = (
+        hp / max_hp
+    )
+
+    if ratio <= 0.30:
+        return 3
+
+    if ratio <= 0.65:
+        return 2
+
+    return 1
+
+
+def get_monster_phase_data(
+    monster_key,
+    phase,
+):
+    """
+    Return phase mechanics for a monster.
+    """
+
+    phases = MONSTER_PHASES.get(
+        str(monster_key),
+        {}
+    )
+
+    return phases.get(
+        int(phase),
+        {
+            "name": "Unknown Phase",
+            "enemy_damage_mult": 1.00,
+            "player_damage_mult": 1.00,
+        }
+    )
+
+
+def apply_monster_phase_player_damage(
+    monster_key,
+    phase,
+    player_damage,
+):
+    """
+    Apply phase-specific protection to incoming player damage.
+    """
+
+    data = get_monster_phase_data(
+        monster_key,
+        phase,
+    )
+
+    multiplier = float(
+        data.get(
+            "player_damage_mult",
+            1.00
+        )
+    )
+
+    return max(
+        1,
+        int(round(
+            int(player_damage)
+            * multiplier
+        ))
+    )
+
+
+def apply_monster_phase_retaliation(
+    monster_key,
+    phase,
+    enemy_damage,
+    *,
+    special_roll=None,
+):
+    """
+    Apply phase retaliation and optional special attacks.
+
+    Returns:
+        final_damage,
+        special_name,
+        special_text
+    """
+
+    data = get_monster_phase_data(
+        monster_key,
+        phase,
+    )
+
+    final_damage = max(
+        0,
+        int(round(
+            int(enemy_damage)
+            * float(
+                data.get(
+                    "enemy_damage_mult",
+                    1.00
+                )
+            )
+        ))
+    )
+
+    special_name = None
+    special_text = ""
+
+    if special_roll is None:
+        special_roll = random.randint(
+            1,
+            100
+        )
+
+    # -----------------------------------------------------
+    # KRAKEN PHASE 3 — TENTACLE SMASH
+    # -----------------------------------------------------
+
+    if (
+        monster_key == "kraken"
+        and int(phase) == 3
+        and special_roll <= 20
+    ):
+
+        bonus = max(
+            1,
+            int(round(
+                final_damage * 0.35
+            ))
+        )
+
+        final_damage += bonus
+
+        special_name = "tentacle_smash"
+
+        special_text = (
+            "**TENTACLE SMASH!**\n"
+            "The Kraken brings a massive tentacle down "
+            "across the Living Ship for **"
+            + str(bonus)
+            + "** additional damage."
+        )
+
+    # -----------------------------------------------------
+    # DROWNED KING PHASE 3 — DROWNED WRATH
+    # -----------------------------------------------------
+
+    elif (
+        monster_key == "drowned_king"
+        and int(phase) == 3
+        and special_roll <= 20
+    ):
+
+        bonus = max(
+            1,
+            int(round(
+                final_damage * 0.30
+            ))
+        )
+
+        final_damage += bonus
+
+        special_name = "drowned_wrath"
+
+        special_text = (
+            "**DROWNED WRATH!**\n"
+            "The Drowned King calls the black sea against "
+            "the hull for **"
+            + str(bonus)
+            + "** additional damage."
+        )
+
+    return (
+        final_damage,
+        special_name,
+        special_text,
+    )
+
+
+def format_monster_phase_transition(
+    monster_key,
+    phase,
+):
+    data = get_monster_phase_data(
+        monster_key,
+        phase,
+    )
+
+    names = {
+        1: "I",
+        2: "II",
+        3: "III",
+    }
+
+    return (
+        "**PHASE "
+        + names.get(
+            int(phase),
+            str(phase)
+        )
+        + " — "
+        + str(data["name"]).upper()
+        + "**"
+    )
+
+
+async def record_monster_phase_change(
+    encounter,
+    guild_id,
+    old_phase,
+    new_phase,
+):
+    """
+    Persist a phase transition and its history event.
+    """
+
+    if int(new_phase) == int(old_phase):
+        return False
+
+    db = await _db()
+
+    try:
+
+        cursor = await db.execute(
+            """
+            UPDATE monster_encounters
+            SET phase = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status = 'active'
+              AND phase = ?
+            """,
+            (
+                int(new_phase),
+                encounter["id"],
+                int(old_phase),
+            )
+        )
+
+        changed = (
+            cursor.rowcount == 1
+        )
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    if not changed:
+        return False
+
+    phase_data = get_monster_phase_data(
+        encounter["monster_key"],
+        new_phase,
+    )
+
+    await add_monster_event(
+        encounter["id"],
+        guild_id,
+        "phase_change",
+        (
+            encounter["name"]
+            + " entered Phase "
+            + str(new_phase)
+            + ": "
+            + str(phase_data["name"])
+            + "."
+        )
+    )
+
+    return True
+
+
 async def attack_monster(
     guild_id,
-    ship=None
+    ship=None,
+    damage_multiplier=1.0
 ):
 
     if not ship_can_fight(ship):
@@ -304,11 +731,54 @@ async def attack_monster(
     )
 
     if not encounter:
-        return False, "There is no monster to attack.", None
+        return (
+            False,
+            "There is no monster to attack.",
+            None
+        )
 
-    player_damage = roll_player_damage(
+    monster_key = str(
+        encounter["monster_key"]
+    )
+
+    old_phase = int(
+        encounter["phase"]
+        if encounter["phase"] is not None
+        else 1
+    )
+
+    # -----------------------------------------------------
+    # PLAYER ATTACK
+    #
+    # Phase protection uses the phase that existed at the
+    # START of the turn.
+    #
+    # This is important for Leviathan's Dive: a cannon hit
+    # that causes Phase 2 is not retroactively reduced.
+    # -----------------------------------------------------
+
+    raw_player_damage = roll_player_damage(
         ship,
         "monster"
+    )
+
+    raw_player_damage = max(
+        1,
+        int(round(
+            raw_player_damage
+            * max(
+                0.0,
+                float(damage_multiplier)
+            )
+        ))
+    )
+
+    player_damage = (
+        apply_monster_phase_player_damage(
+            monster_key,
+            old_phase,
+            raw_player_damage,
+        )
     )
 
     hp = max(
@@ -317,41 +787,92 @@ async def attack_monster(
         - player_damage
     )
 
+    # -----------------------------------------------------
+    # DETERMINE POST-HIT PHASE
+    # -----------------------------------------------------
+
+    new_phase = calculate_monster_phase(
+        hp,
+        int(encounter["max_hp"]),
+    )
+
+    phase_changed = (
+        hp > 0
+        and new_phase != old_phase
+    )
+
+    # -----------------------------------------------------
+    # MONSTER RETALIATION
+    #
+    # Retaliation uses the NEW phase immediately.
+    # -----------------------------------------------------
+
     enemy_damage = 0
+    special_name = None
+    special_text = ""
 
     if hp > 0:
-        enemy_damage = random.randint(
+
+        raw_enemy_damage = random.randint(
             int(encounter["attack_min"]),
             int(encounter["attack_max"])
         )
 
+        (
+            enemy_damage,
+            special_name,
+            special_text,
+        ) = apply_monster_phase_retaliation(
+            monster_key,
+            new_phase,
+            raw_enemy_damage,
+        )
+
+    # -----------------------------------------------------
+    # PERSIST HP / VICTORY
+    # -----------------------------------------------------
+
     db = await _db()
 
     try:
-        await db.execute("""
+
+        await db.execute(
+            """
             UPDATE monster_encounters
             SET hp = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (
-            hp,
-            encounter["id"],
-        ))
+              AND status = 'active'
+            """,
+            (
+                hp,
+                encounter["id"],
+            )
+        )
 
         if hp <= 0:
-            await db.execute("""
+
+            await db.execute(
+                """
                 UPDATE monster_encounters
                 SET status = 'victory',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (
-                encounter["id"],
-            ))
+                  AND status = 'active'
+                """,
+                (
+                    encounter["id"],
+                )
+            )
 
         await db.commit()
 
     finally:
         await db.close()
+
+    # -----------------------------------------------------
+    # VICTORY
+    # -----------------------------------------------------
 
     if hp <= 0:
 
@@ -390,29 +911,81 @@ async def attack_monster(
         ), {
             "victory": True,
             "reward": reward,
-            "xp": int(encounter["xp_reward"]),
+            "xp": int(
+                encounter["xp_reward"]
+            ),
             "enemy_damage": 0,
             "name": encounter["name"],
+            "phase": old_phase,
+            "phase_changed": False,
+            "special": None,
+            "player_damage": player_damage,
+            "raw_player_damage": raw_player_damage,
         }
+
+    # -----------------------------------------------------
+    # PHASE TRANSITION
+    # -----------------------------------------------------
+
+    transition_text = ""
+
+    if phase_changed:
+
+        changed = (
+            await record_monster_phase_change(
+                encounter,
+                guild_id,
+                old_phase,
+                new_phase,
+            )
+        )
+
+        if changed:
+
+            transition_text = (
+                "\n\n"
+                + format_monster_phase_transition(
+                    monster_key,
+                    new_phase,
+                )
+            )
+
+    # -----------------------------------------------------
+    # ATTACK HISTORY
+    # -----------------------------------------------------
+
+    description = (
+        "The crew dealt "
+        + str(player_damage)
+        + " damage to "
+        + encounter["name"]
+        + "; "
+        + encounter["name"]
+        + " retaliated for "
+        + str(enemy_damage)
+        + " damage."
+    )
+
+    if special_name:
+
+        description += (
+            " Special attack: "
+            + special_name
+            + "."
+        )
 
     await add_monster_event(
         encounter["id"],
         guild_id,
         "attack",
-        (
-            "The crew dealt "
-            + str(player_damage)
-            + " damage to "
-            + encounter["name"]
-            + "; "
-            + encounter["name"]
-            + " retaliated for "
-            + str(enemy_damage)
-            + " damage."
-        )
+        description,
     )
 
-    return True, (
+    # -----------------------------------------------------
+    # RESPONSE
+    # -----------------------------------------------------
+
+    text = (
         "**MONSTER ATTACK**\n"
         "The crew deals **"
         + str(player_damage)
@@ -428,10 +1001,26 @@ async def attack_monster(
         + "/"
         + str(encounter["max_hp"])
         + "**"
-    ), {
+    )
+
+    text += transition_text
+
+    if special_text:
+        text += (
+            "\n\n"
+            + special_text
+        )
+
+    return True, text, {
         "victory": False,
         "reward": 0,
         "xp": 0,
         "enemy_damage": enemy_damage,
         "name": encounter["name"],
+        "phase": new_phase,
+        "phase_changed": phase_changed,
+        "special": special_name,
+        "player_damage": player_damage,
+        "raw_player_damage": raw_player_damage,
     }
+

@@ -334,7 +334,7 @@ async def handle_ship_command(
             )
             return True
 
-        ok, text = await donate(
+        donation_result = await donate(
             message.guild.id,
             message.author.id,
             message.author.display_name,
@@ -342,6 +342,68 @@ async def handle_ship_command(
             get_doubloons,
             add_doubloons
         )
+
+        ok = donation_result[0]
+        text = donation_result[1]
+
+        milestones = (
+            donation_result[2]
+            if (
+                ok
+                and len(donation_result) > 2
+            )
+            else []
+        )
+
+        pending_reward_total = (
+            int(donation_result[3])
+            if (
+                ok
+                and len(donation_result) > 3
+            )
+            else 0
+        )
+
+        if milestones:
+
+            total_reward = sum(
+                int(item["reward"])
+                for item in milestones
+            )
+
+            milestone_lines = [
+                (
+                    "**"
+                    + str(item["milestone"])
+                    + " donated** — **+"
+                    + str(item["reward"])
+                    + " doubloons**"
+                )
+                for item in milestones
+            ]
+
+            text += (
+                "\n\n"
+                "🏴‍☠️ **CREW CONTRIBUTION REWARD!**\n"
+                + "\n".join(
+                    milestone_lines
+                )
+                + "\n**Total reward: +"
+                + str(total_reward)
+                + " doubloons**"
+            )
+
+        if pending_reward_total:
+
+            text += (
+                "\n\n"
+                "⚠️ **Contribution reward queued:** "
+                "**"
+                + str(pending_reward_total)
+                + " doubloons**. "
+                "The reward will be retried automatically "
+                "on yer next successful ship donation."
+            )
 
         await message.reply(
             text,

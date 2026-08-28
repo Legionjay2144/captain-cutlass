@@ -518,6 +518,17 @@ async def initialize_database():
             )
         """)
 
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tickle_stats (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                tickle_count INTEGER DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        """)
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS running_jokes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -756,6 +767,36 @@ async def initialize_database():
                 guild_id,
                 importance DESC,
                 id DESC
+            )
+        """)
+
+        # -------------------------------------------------
+        # Achievement uniqueness
+        #
+        # Existing databases may contain duplicate legacy
+        # achievements, so remove duplicates before creating
+        # the unique case-insensitive identity index.
+        # -------------------------------------------------
+
+        await db.execute("""
+            DELETE FROM achievements
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM achievements
+                GROUP BY
+                    guild_id,
+                    user_id,
+                    LOWER(achievement)
+            )
+        """)
+
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                idx_achievements_unique
+            ON achievements (
+                guild_id,
+                user_id,
+                LOWER(achievement)
             )
         """)
 
@@ -2321,44 +2362,37 @@ async def award_achievement(
     description=""
 ):
 
-    db = await get_db()
+    achievement = str(achievement).strip()[:100]
+    description = str(description).strip()[:500]
 
-    cursor = await db.execute("""
-        SELECT id
-        FROM achievements
-        WHERE guild_id = ?
-        AND user_id = ?
-        AND LOWER(achievement) = LOWER(?)
-        LIMIT 1
-    """, (
-        guild_id,
-        user_id,
-        achievement
-    ))
-
-    if await cursor.fetchone():
+    if not achievement:
         return False
+
+    db = await get_db()
 
     async with _write_lock:
 
-        await db.execute("""
-            INSERT INTO achievements (
+        cursor = await db.execute(
+            """
+            INSERT OR IGNORE INTO achievements (
                 guild_id,
                 user_id,
                 achievement,
                 description
             )
             VALUES (?, ?, ?, ?)
-        """, (
-            guild_id,
-            user_id,
-            achievement[:100],
-            description[:500]
-        ))
+            """,
+            (
+                guild_id,
+                user_id,
+                achievement,
+                description,
+            )
+        )
 
         await db.commit()
 
-    return True
+        return cursor.rowcount == 1
 
 
 async def get_achievements(
@@ -3043,3 +3077,105 @@ async def format_captain_canon():
         )
 
     return "\n".join(lines)
+
+
+# ============================================================
+# Captain Cutlass tickle statistics
+# ============================================================
+
+async def get_tickle_count(
+    guild_id,
+    user_id
+):
+    """
+    Return the member's persistent lifetime Captain tickle count.
+    """
+
+    db = await get_db()
+
+    cursor = await db.execute(
+        """
+        SELECT tickle_count
+        FROM tickle_stats
+        WHERE guild_id = ?
+          AND user_id = ?
+        """,
+        (
+            int(guild_id),
+            int(user_id)
+        )
+    )
+
+    row = await cursor.fetchone()
+
+    if not row:
+        return 0
+
+    return int(row[0] or 0)
+
+
+async def increment_tickle_count(
+    guild_id,
+    user_id
+):
+    """
+    Atomically increment and return a member's lifetime tickle count.
+
+    The existing global database write lock prevents simultaneous
+    tickles from losing or duplicating counter updates.
+    """
+
+    db = await get_db()
+
+    guild_id = int(guild_id)
+    user_id = int(user_id)
+
+    async with _write_lock:
+
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO tickle_stats (
+                guild_id,
+                user_id,
+                tickle_count
+            )
+            VALUES (?, ?, 0)
+            """,
+            (
+                guild_id,
+                user_id
+            )
+        )
+
+        await db.execute(
+            """
+            UPDATE tickle_stats
+            SET tickle_count = tickle_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ?
+              AND user_id = ?
+            """,
+            (
+                guild_id,
+                user_id
+            )
+        )
+
+        cursor = await db.execute(
+            """
+            SELECT tickle_count
+            FROM tickle_stats
+            WHERE guild_id = ?
+              AND user_id = ?
+            """,
+            (
+                guild_id,
+                user_id
+            )
+        )
+
+        row = await cursor.fetchone()
+
+        await db.commit()
+
+    return int(row[0] or 0)

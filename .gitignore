@@ -11,3 +11,8 @@ data/captain.db-wal
 data/captain.db-shm
 
 *.tar.gz
+
+# Captain Cutlass development backups
+*.bak
+*.bak.*
+*.broken-*

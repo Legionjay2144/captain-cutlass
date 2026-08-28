@@ -250,6 +250,79 @@ async def start_boss(
         return True, active_boss
 
 
+async def force_withdraw_boss(guild_id):
+    """
+    Terminate the active boss encounter because the Living Ship
+    became non-operational.
+
+    The boss remains undefeated and no victory rewards are
+    generated here.
+    """
+
+    db = await _db()
+
+    try:
+        boss = await (
+            await db.execute(
+                """
+                SELECT *
+                FROM boss_encounters
+                WHERE guild_id = ?
+                  AND status = 'active'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (guild_id,),
+            )
+        ).fetchone()
+
+        if not boss:
+            return False, None
+
+        cursor = await db.execute(
+            """
+            UPDATE boss_encounters
+            SET status = 'player_disabled',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status = 'active'
+            """,
+            (boss["id"],),
+        )
+
+        changed = cursor.rowcount == 1
+
+        if changed:
+            await db.execute(
+                """
+                INSERT INTO boss_events (
+                    boss_id,
+                    guild_id,
+                    action,
+                    description
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    boss["id"],
+                    guild_id,
+                    "player_disabled",
+                    (
+                        "The Living Ship became non-operational. "
+                        "The crew was forced to withdraw from "
+                        + boss["name"]
+                        + "; the boss remained undefeated."
+                    ),
+                ),
+            )
+
+        await db.commit()
+
+        return changed, dict(boss)
+
+    finally:
+        await db.close()
+
 async def format_boss(guild_id):
 
     boss = await get_active_boss(
@@ -282,9 +355,330 @@ async def format_boss(guild_id):
     )
 
 
+
+# =========================================================
+# BOSS PHASE MECHANICS
+# =========================================================
+
+BOSS_PHASE_MECHANICS = {
+
+    "skullfin_guardian": {
+        1: {
+            "name": "Guardian's Watch",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        },
+        2: {
+            "name": "Blood in the Water",
+            "enemy_damage_mult": 1.25,
+            "defend_mult": 0.50,
+        },
+    },
+
+    "drowned_captain": {
+        1: {
+            "name": "Dead Man's Command",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        },
+        2: {
+            "name": "All Hands Below",
+            "enemy_damage_mult": 1.20,
+            "defend_mult": 0.50,
+        },
+    },
+
+    "drowned_king": {
+        1: {
+            "name": "Sunken Throne",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        },
+        2: {
+            "name": "Call of the Abyss",
+            "enemy_damage_mult": 1.20,
+
+            # Only 40% blocked:
+            # player receives 60%.
+            "defend_mult": 0.60,
+        },
+        3: {
+            "name": "Wrath of the Deep",
+            "enemy_damage_mult": 1.45,
+            "defend_mult": 0.60,
+        },
+    },
+}
+
+
+def calculate_boss_phase(
+    hp,
+    max_hp,
+    max_phase,
+):
+    """
+    Determine boss phase from remaining HP.
+
+    Two-phase bosses:
+        Phase 2 at <= 50%.
+
+    Three-phase bosses:
+        Phase 2 at <= 65%.
+        Phase 3 at <= 30%.
+    """
+
+    hp = max(
+        0,
+        int(hp)
+    )
+
+    max_hp = max(
+        1,
+        int(max_hp)
+    )
+
+    max_phase = max(
+        1,
+        int(max_phase)
+    )
+
+    ratio = hp / max_hp
+
+    if max_phase >= 3:
+
+        if ratio <= 0.30:
+            return 3
+
+        if ratio <= 0.65:
+            return 2
+
+        return 1
+
+    if max_phase == 2:
+
+        if ratio <= 0.50:
+            return 2
+
+        return 1
+
+    return 1
+
+
+def get_boss_phase_data(
+    boss_key,
+    phase,
+):
+    phases = BOSS_PHASE_MECHANICS.get(
+        str(boss_key),
+        {}
+    )
+
+    return phases.get(
+        int(phase),
+        {
+            "name": "Unknown Phase",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        }
+    )
+
+
+def boss_phase_attack_range(
+    boss,
+    phase,
+):
+    """
+    Preserve the existing +4/+7 numerical escalation.
+    """
+
+    phase = max(
+        1,
+        int(phase)
+    )
+
+    return (
+        int(boss["attack_min"])
+        + ((phase - 1) * 4),
+
+        int(boss["attack_max"])
+        + ((phase - 1) * 7),
+    )
+
+
+def apply_boss_phase_retaliation(
+    boss_key,
+    phase,
+    enemy_damage,
+    *,
+    special_roll=None,
+):
+    data = get_boss_phase_data(
+        boss_key,
+        phase,
+    )
+
+    final_damage = max(
+        0,
+        int(round(
+            int(enemy_damage)
+            * float(
+                data.get(
+                    "enemy_damage_mult",
+                    1.00
+                )
+            )
+        ))
+    )
+
+    special_name = None
+    special_text = ""
+
+    if special_roll is None:
+        special_roll = random.randint(
+            1,
+            100
+        )
+
+    if (
+        boss_key == "skullfin_guardian"
+        and int(phase) == 2
+        and special_roll <= 20
+    ):
+
+        bonus = max(
+            1,
+            int(round(
+                final_damage * 0.30
+            ))
+        )
+
+        final_damage += bonus
+        special_name = "rending_bite"
+
+        special_text = (
+            "**RENDING BITE!**\n"
+            "The Guardian tears into the Living Ship "
+            "for **"
+            + str(bonus)
+            + "** additional damage."
+        )
+
+    elif (
+        boss_key == "drowned_captain"
+        and int(phase) == 2
+        and special_roll <= 25
+    ):
+
+        bonus = max(
+            1,
+            int(round(
+                final_damage * 0.35
+            ))
+        )
+
+        final_damage += bonus
+        special_name = "ghostly_broadside"
+
+        special_text = (
+            "**GHOSTLY BROADSIDE!**\n"
+            "Spectral cannons rake the Living Ship "
+            "for **"
+            + str(bonus)
+            + "** additional damage."
+        )
+
+    elif (
+        boss_key == "drowned_king"
+        and int(phase) == 3
+        and special_roll <= 20
+    ):
+
+        bonus = max(
+            1,
+            int(round(
+                final_damage * 0.30
+            ))
+        )
+
+        final_damage += bonus
+        special_name = "abyssal_surge"
+
+        special_text = (
+            "**ABYSSAL SURGE!**\n"
+            "The black sea rises at the King's command "
+            "for **"
+            + str(bonus)
+            + "** additional damage."
+        )
+
+    return (
+        final_damage,
+        special_name,
+        special_text,
+    )
+
+
+def apply_boss_defense(
+    boss_key,
+    phase,
+    raw_damage,
+):
+    """
+    Apply phase-specific defensive effectiveness.
+    """
+
+    data = get_boss_phase_data(
+        boss_key,
+        phase,
+    )
+
+    multiplier = float(
+        data.get(
+            "defend_mult",
+            0.50
+        )
+    )
+
+    return max(
+        1,
+        int(round(
+            int(raw_damage)
+            * multiplier
+        ))
+    )
+
+
+def format_boss_phase_transition(
+    boss_key,
+    phase,
+):
+    data = get_boss_phase_data(
+        boss_key,
+        phase,
+    )
+
+    numerals = {
+        1: "I",
+        2: "II",
+        3: "III",
+    }
+
+    return (
+        "**PHASE "
+        + numerals.get(
+            int(phase),
+            str(phase)
+        )
+        + " — "
+        + str(data["name"]).upper()
+        + "**"
+    )
+
+
 async def attack_boss(
     guild_id,
-    ship=None
+    ship=None,
+    damage_multiplier=1.0
 ):
 
     boss = await get_active_boss(
@@ -292,7 +686,11 @@ async def attack_boss(
     )
 
     if not boss:
-        return False, "There is no boss to attack.", None
+        return (
+            False,
+            "There is no boss to attack.",
+            None
+        )
 
     if not ship_can_fight(ship):
         return (
@@ -301,9 +699,42 @@ async def attack_boss(
             None
         )
 
+    boss_key = str(
+        boss["boss_key"]
+    )
+
+    old_phase = max(
+        1,
+        int(
+            boss["phase"]
+        )
+    )
+
+    max_phase = max(
+        1,
+        int(
+            boss["max_phase"]
+        )
+    )
+
+    # -----------------------------------------------------
+    # PLAYER ATTACK
+    # -----------------------------------------------------
+
     player_damage = roll_player_damage(
         ship,
         "boss"
+    )
+
+    player_damage = max(
+        1,
+        int(round(
+            player_damage
+            * max(
+                0.0,
+                float(damage_multiplier)
+            )
+        ))
     )
 
     hp = max(
@@ -312,80 +743,142 @@ async def attack_boss(
         - player_damage
     )
 
-    phase = int(boss["phase"])
-    max_phase = int(boss["max_phase"])
+    # -----------------------------------------------------
+    # PHASE CALCULATION
+    #
+    # The player's hit lands first.
+    # If the boss survives and crosses a threshold,
+    # retaliation uses the NEW phase immediately.
+    # -----------------------------------------------------
 
-    # Phase thresholds.
-    phase_size = max(
-        1,
-        int(boss["max_hp"]) // max_phase
-    )
-
-    expected_phase = min(
+    new_phase = calculate_boss_phase(
+        hp,
+        int(boss["max_hp"]),
         max_phase,
-        max(
-            1,
-            max_phase - (hp // phase_size)
-        )
     )
+
+    if hp <= 0:
+        new_phase = old_phase
 
     phase_changed = (
-        expected_phase > phase
-        and hp > 0
+        hp > 0
+        and new_phase > old_phase
     )
 
-    if phase_changed:
-        phase = expected_phase
-
-    attack_min = int(
-        boss["attack_min"]
+    phase = (
+        new_phase
+        if phase_changed
+        else old_phase
     )
 
-    attack_max = int(
-        boss["attack_max"]
-    )
-
-    # Boss grows more dangerous each phase.
-    attack_min += (phase - 1) * 4
-    attack_max += (phase - 1) * 7
+    # -----------------------------------------------------
+    # RETALIATION
+    # -----------------------------------------------------
 
     enemy_damage = 0
+    special_name = None
+    special_text = ""
 
     if hp > 0:
-        enemy_damage = random.randint(
+
+        (
             attack_min,
-            attack_max
+            attack_max,
+        ) = boss_phase_attack_range(
+            boss,
+            phase,
         )
+
+        raw_enemy_damage = random.randint(
+            attack_min,
+            attack_max,
+        )
+
+        (
+            enemy_damage,
+            special_name,
+            special_text,
+        ) = apply_boss_phase_retaliation(
+            boss_key,
+            phase,
+            raw_enemy_damage,
+        )
+
+    # -----------------------------------------------------
+    # ATOMIC ACTIVE-STATUS UPDATE
+    # -----------------------------------------------------
 
     db = await _db()
 
     try:
-        await db.execute("""
+
+        cursor = await db.execute(
+            """
             UPDATE boss_encounters
             SET hp = ?,
                 phase = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (
-            hp,
-            phase,
-            boss["id"],
-        ))
+              AND status = 'active'
+            """,
+            (
+                hp,
+                phase,
+                boss["id"],
+            )
+        )
+
+        changed = (
+            cursor.rowcount == 1
+        )
+
+        if not changed:
+
+            await db.rollback()
+
+            return (
+                False,
+                "The boss encounter is no longer active.",
+                None
+            )
 
         if hp <= 0:
-            await db.execute("""
+
+            victory_cursor = await db.execute(
+                """
                 UPDATE boss_encounters
                 SET status = 'victory',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (
-                boss["id"],
-            ))
+                  AND status = 'active'
+                """,
+                (
+                    boss["id"],
+                )
+            )
+
+            victory_changed = (
+                victory_cursor.rowcount == 1
+            )
+
+            if not victory_changed:
+
+                await db.rollback()
+
+                return (
+                    False,
+                    "The boss encounter is no longer active.",
+                    None
+                )
 
         await db.commit()
 
     finally:
         await db.close()
+
+    # -----------------------------------------------------
+    # NORMAL ATTACK EVENT
+    # -----------------------------------------------------
 
     await add_boss_event(
         boss["id"],
@@ -400,7 +893,17 @@ async def attack_boss(
         )
     )
 
+    # -----------------------------------------------------
+    # PHASE TRANSITION EVENT
+    # -----------------------------------------------------
+
     if phase_changed:
+
+        phase_data = get_boss_phase_data(
+            boss_key,
+            phase,
+        )
+
         await add_boss_event(
             boss["id"],
             guild_id,
@@ -409,9 +912,17 @@ async def attack_boss(
                 boss["name"]
                 + " entered phase "
                 + str(phase)
+                + ": "
+                + str(
+                    phase_data["name"]
+                )
                 + "."
             )
         )
+
+    # -----------------------------------------------------
+    # VICTORY
+    # -----------------------------------------------------
 
     if hp <= 0:
 
@@ -450,10 +961,20 @@ async def attack_boss(
         ), {
             "victory": True,
             "reward": reward,
-            "xp": int(boss["xp_reward"]),
+            "xp": int(
+                boss["xp_reward"]
+            ),
             "enemy_damage": 0,
             "name": boss["name"],
+            "phase": old_phase,
+            "phase_changed": False,
+            "special": None,
+            "player_damage": player_damage,
         }
+
+    # -----------------------------------------------------
+    # RESPONSE
+    # -----------------------------------------------------
 
     text = (
         "**BOSS ATTACK**\n"
@@ -465,12 +986,14 @@ async def attack_boss(
     )
 
     if phase_changed:
+
         text += (
-            "\n**PHASE "
-            + str(phase)
-            + " BEGINS!**\n"
-            + boss["name"]
-            + " grows more dangerous.\n"
+            "\n"
+            + format_boss_phase_transition(
+                boss_key,
+                phase,
+            )
+            + "\n"
         )
 
     text += (
@@ -490,14 +1013,24 @@ async def attack_boss(
         + "**"
     )
 
+    if special_text:
+
+        text += (
+            "\n\n"
+            + special_text
+        )
+
     return True, text, {
         "victory": False,
         "reward": 0,
         "xp": 0,
         "enemy_damage": enemy_damage,
         "name": boss["name"],
+        "phase": phase,
+        "phase_changed": phase_changed,
+        "special": special_name,
+        "player_damage": player_damage,
     }
-
 
 async def defend_boss(
     guild_id,
@@ -516,20 +1049,40 @@ async def defend_boss(
     )
 
     if not boss:
-        return False, "There is no boss to defend against.", None
+        return (
+            False,
+            "There is no boss to defend against.",
+            None
+        )
 
-    phase = int(
-        boss["phase"]
+    boss_key = str(
+        boss["boss_key"]
     )
 
-    raw = random.randint(
-        int(boss["attack_min"]) + (phase - 1) * 4,
-        int(boss["attack_max"]) + (phase - 1) * 7
-    )
-
-    damage = max(
+    phase = max(
         1,
-        raw // 2
+        int(
+            boss["phase"]
+        )
+    )
+
+    (
+        attack_min,
+        attack_max,
+    ) = boss_phase_attack_range(
+        boss,
+        phase,
+    )
+
+    raw_damage = random.randint(
+        attack_min,
+        attack_max,
+    )
+
+    damage = apply_boss_defense(
+        boss_key,
+        phase,
+        raw_damage,
     )
 
     await add_boss_event(
@@ -539,10 +1092,19 @@ async def defend_boss(
         (
             "The crew defended against "
             + boss["name"]
-            + " and reduced incoming damage to "
+            + " during phase "
+            + str(phase)
+            + " and reduced incoming damage from "
+            + str(raw_damage)
+            + " to "
             + str(damage)
             + "."
         )
+    )
+
+    phase_data = get_boss_phase_data(
+        boss_key,
+        phase,
     )
 
     return True, (
@@ -550,9 +1112,24 @@ async def defend_boss(
         "The crew braces against "
         + boss["name"]
         + ".\n"
+        "Phase: **"
+        + str(phase)
+        + " — "
+        + str(
+            phase_data["name"]
+        )
+        + "**\n"
         "Incoming damage reduced to **"
         + str(damage)
         + "**."
     ), {
+        "victory": False,
+        "reward": 0,
+        "xp": 0,
         "enemy_damage": damage,
+        "name": boss["name"],
+        "phase": phase,
+        "phase_changed": False,
+        "special": None,
     }
+

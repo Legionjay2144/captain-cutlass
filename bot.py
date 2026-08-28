@@ -29,9 +29,21 @@ from cutlass.commands.battle import handle_battle_command
 from cutlass.commands.monsters import handle_monster_command
 from cutlass.commands.bosses import handle_boss_command
 from cutlass.commands.combat import handle_combat_command
+from cutlass.help.natural import (
+    find_natural_command_help,
+    find_contextual_command_help,
+    is_contextual_help_followup,
+    command_suggestions,
+)
+from cutlass.commands.tickle import (
+    handle_tickle_command,
+    perform_tickle,
+    is_natural_tickle_message,
+)
 from cutlass.world.bosses import (
     initialize_bosses,
     get_active_boss,
+    force_withdraw_boss,
     start_boss,
     format_boss,
     attack_boss,
@@ -43,6 +55,7 @@ from cutlass.world.monsters import (
     format_monster,
     attack_monster,
     get_active_monster,
+    force_withdraw_monster,
 )
 from cutlass.world.naval import (
     initialize_naval,
@@ -53,6 +66,7 @@ from cutlass.world.naval import (
     board_enemy,
     flee_battle,
     get_active_battle,
+    force_withdraw_battle,
 )
 from cutlass.world.pirate_world import (
     initialize_pirate_world,
@@ -201,6 +215,8 @@ from memory import (
     save_chronicle,
     get_latest_chronicle,
     nickname_is_taken,
+    get_tickle_count,
+    increment_tickle_count,
 )
 
 
@@ -963,12 +979,20 @@ def detect_direct_question_mode(message):
 
     return content.endswith("?")
 
+
 def detect_humor_mode(message):
     """
-    Deterministically classify the current humor interaction.
+    Deterministically classify humor and playful hypothetical messages.
+
+    Special conversational humor must be identified before broad
+    direct-question/gameplay routing.
     """
 
     content = message.content.lower().strip()
+
+    # --------------------------------------------------------
+    # Targeted jokes / roasts
+    # --------------------------------------------------------
 
     targeted_patterns = [
         r"\bmake\s+(?:me\s+)?(?:a\s+)?joke\s+about\b",
@@ -980,30 +1004,54 @@ def detect_humor_mode(message):
     ]
 
     for pattern in targeted_patterns:
-        if re.search(pattern, content, re.IGNORECASE):
+        if re.search(
+            pattern,
+            content,
+            re.IGNORECASE
+        ):
             return "TARGETED_JOKE_REQUEST"
+
+    # --------------------------------------------------------
+    # Explicit humor requests
+    #
+    # Supports adjective-bearing requests such as:
+    #   "Tell me a pirate joke"
+    #   "Give me an old man joke"
+    # --------------------------------------------------------
 
     humor_request_patterns = [
         r"\bgive\s+(?:me\s+)?(?:a\s+)?pun\b",
         r"\btell\s+(?:me\s+)?(?:a\s+)?pun\b",
-        r"\bpun\s+pls\b",
-        r"\bpun\s+please\b",
+        r"\bpun\s+(?:pls|please)\b",
+
         r"\bgive\s+(?:me\s+)?(?:a\s+)?joke\b",
         r"\btell\s+(?:me\s+)?(?:a\s+)?joke\b",
+
+        r"\bgive\s+(?:me\s+)?(?:an?\s+)?(?:[\w'-]+\s+){0,4}joke\b",
+        r"\btell\s+(?:me\s+)?(?:an?\s+)?(?:[\w'-]+\s+){0,4}joke\b",
+
         r"\bmake\s+(?:me\s+)?laugh\b",
+
         r"\bgive\s+(?:me\s+)?(?:a\s+)?one[- ]liner\b",
         r"\btell\s+(?:me\s+)?(?:a\s+)?one[- ]liner\b",
     ]
 
     for pattern in humor_request_patterns:
-        if re.search(pattern, content, re.IGNORECASE):
+        if re.search(
+            pattern,
+            content,
+            re.IGNORECASE
+        ):
             return "HUMOR_REQUEST"
+
+    # --------------------------------------------------------
+    # Jokes being told TO Captain
+    # --------------------------------------------------------
 
     joke_signals = [
         r"\bwhy did\b",
         r"\bwhat do you call\b",
         r"\bwhat did\b",
-        r"\bhow do\b",
         r"\bwalks into\b",
         r"\bknock knock\b",
         r"\btherefore\b.*\bar+r+\b",
@@ -1011,16 +1059,70 @@ def detect_humor_mode(message):
     ]
 
     for pattern in joke_signals:
-        if re.search(pattern, content, re.IGNORECASE):
+        if re.search(
+            pattern,
+            content,
+            re.IGNORECASE
+        ):
             return "JOKE_TOLD_TO_CAPTAIN"
 
-    # Playful / fictional hypothetical questions should get their own
-    # isolated response path so unrelated memories and callbacks cannot
-    # hijack the scenario.
+    # --------------------------------------------------------
+    # "Who would/will win?" and matchup questions
+    #
+    # These are conversation, NOT Ship World combat requests.
+    # --------------------------------------------------------
+
+    matchup_patterns = [
+        r"\bwho\s+(?:would|will)\s+win\b",
+        r"\bwho\s+wins\b",
+
+        r"\b(?:which|what)\s+"
+        r"(?:one|side|team|creature|monster|character)"
+        r"\s+(?:would|will)\s+win\b",
+
+        r"\bwould\s+.+?\s+"
+        r"(?:beat|defeat|win\s+against)\s+.+?"
+        r"(?:\?|$)",
+    ]
+
+    for pattern in matchup_patterns:
+        if re.search(
+            pattern,
+            content,
+            re.IGNORECASE
+        ):
+            return "PLAYFUL_HYPOTHETICAL"
+
+    # Explicit versus / against scenarios involving a contest.
+    versus_matchup = (
+        re.search(
+            r"\b(?:vs\.?|versus|against)\b",
+            content,
+            re.IGNORECASE
+        )
+        and re.search(
+            r"\b(?:"
+            r"win|wins|fight|battle|wrestl\w*|"
+            r"race|contest|match|beat|defeat"
+            r")\b",
+            content,
+            re.IGNORECASE
+        )
+    )
+
+    if versus_matchup:
+        return "PLAYFUL_HYPOTHETICAL"
+
+    # --------------------------------------------------------
+    # Explicit hypothetical constructions
+    # --------------------------------------------------------
+
     hypothetical_markers = (
         "hypothetically",
         "hypothetical",
         "what if ",
+        "what happens if ",
+        "what would happen if ",
         "what would you do if",
         "what would ye do if",
         "if you became",
@@ -1031,8 +1133,10 @@ def detect_humor_mode(message):
         "how would ye ",
         "imagine you ",
         "imagine ye ",
+        "imagine if ",
         "suppose you ",
         "suppose ye ",
+        "suppose if ",
     )
 
     if any(
@@ -1041,7 +1145,37 @@ def detect_humor_mode(message):
     ):
         return "PLAYFUL_HYPOTHETICAL"
 
+    # Questions about Captain/Barnacle/pirates in an imaginary
+    # conditional situation should remain conversational even when
+    # the subject happens to include identity-related words.
+    fictional_subject = re.search(
+        r"\b(?:"
+        r"captain\s+cutlass|cutlass|captain|"
+        r"barnacle|parrot|pirate"
+        r")\b",
+        content,
+        re.IGNORECASE
+    )
+
+    conditional_question = (
+        "?" in content
+        and re.search(
+            r"\b(?:would|could|might)\b",
+            content,
+            re.IGNORECASE
+        )
+        and re.search(
+            r"\bif\b",
+            content,
+            re.IGNORECASE
+        )
+    )
+
+    if fictional_subject and conditional_question:
+        return "PLAYFUL_HYPOTHETICAL"
+
     return "NORMAL"
+
 
 
 async def resolve_joke_target(message):
@@ -1494,6 +1628,62 @@ async def build_gameplay_context(
     )
 
     # -----------------------------------------------------
+    # Priority 6A contextual command-help continuity
+    #
+    # get_recent_messages() returns oldest -> newest.
+    # find_contextual_command_help() expects newest-first,
+    # so reverse the recent rows deliberately.
+    #
+    # This only activates for explicit command/help follow-ups
+    # such as "how do I do that?" or "what command was that?"
+    # Normal conversation remains untouched.
+    # -----------------------------------------------------
+
+    contextual_help = None
+
+    if is_contextual_help_followup(
+        message.content
+    ):
+
+        recent_for_help = await get_recent_messages(
+            message.guild.id,
+            message.channel.id,
+            8
+        )
+
+        # Priority 6A contextual command help should resolve
+        # against crew messages, not Captain's generated replies.
+        #
+        # Captain may mention broad gameplay words such as "ship"
+        # while responding conversationally. Feeding those replies
+        # back into the command resolver can incorrectly override the
+        # member's actual subject:
+        #
+        # member: "we need to repair the ship"
+        # Captain: "...this ship..."
+        # member: "how do I do that?"
+        #
+        # The authoritative help subject should remain "repair".
+        recent_help_text = [
+            str(row[1])
+            for row in reversed(
+                recent_for_help
+            )
+            if str(row[0]) not in {
+                str(bot.user.display_name),
+                str(bot.user.name),
+            }
+        ]
+
+        contextual_help = find_contextual_command_help(
+            message.content,
+            recent_help_text,
+        )
+
+        if contextual_help:
+            gameplay_detected = True
+
+    # -----------------------------------------------------
     # Follow-up continuity
     #
     # "What about the one before that?" contains no obvious
@@ -1795,82 +1985,61 @@ async def build_gameplay_context(
             )
 
     # -----------------------------------------------------
-    # Natural gameplay command hints
+    # Authoritative natural gameplay command help
+    #
+    # Command recommendations come from the same tested
+    # command catalog rather than being duplicated here.
+    # This prevents stale or invented command syntax.
     # -----------------------------------------------------
 
-    command_hint = None
+    natural_help = find_natural_command_help(
+        message.content
+    )
 
+    # A short follow-up such as "how do I do that?" has no
+    # command topic in the sentence itself. In that case use
+    # the newest authoritative gameplay topic found above.
     if (
-        "repair" in content
-        or "fix the ship" in content
-        or "fix our ship" in content
+        natural_help is None
+        and contextual_help is not None
     ):
-        command_hint = (
-            "`!c repair` — repair the Living Ship."
-        )
+        natural_help = contextual_help
 
-    elif (
-        "where can we sail" in content
-        or "destination" in content
-        or "where can we go" in content
-    ):
-        command_hint = (
-            "`!c destinations` — view charted voyage routes."
-        )
-
-    elif (
-        "how do i sail" in content
-        or "start a voyage" in content
-    ):
-        command_hint = (
-            "`!c destinations` to view routes, then "
-            "`!c voyage <number>` to set sail."
-        )
-
-    elif (
-        "how do i explore an island" in content
-        or "island explore" in content
-    ):
-        command_hint = (
-            "`!c island explore` — explore the island "
-            "where the ship is physically anchored."
-        )
-
-    elif (
-        "explore" in content
-        or "scout" in content
-    ):
-        command_hint = (
-            "`!c explore` — scout the seas for discoveries."
-        )
-
-    elif (
-        "board" in content
-        or "boarding" in content
-    ):
-        command_hint = (
-            "`!c board` — attempt to board a weakened enemy vessel."
-        )
-
-    elif "upgrade" in content:
-        command_hint = (
-            "`!c upgrades` — view Living Ship upgrades."
-        )
-
-    elif "ship status" in content:
-        command_hint = (
-            "`!c ship` — view full Living Ship status."
-        )
-
-    if command_hint:
+    if natural_help:
 
         lines.extend([
             "",
-            "RELEVANT GAMEPLAY COMMAND:",
-            command_hint,
+            "AUTHORITATIVE COMMAND RECOMMENDATION:",
             (
-                "Include this command naturally if answering "
-                "a gameplay-help question."
+                "`"
+                + natural_help["command"]
+                + "` — "
+                + natural_help["description"]
+                + "."
+            ),
+            (
+                "This command exists in Captain Cutlass's "
+                "authoritative command-help catalog."
+            ),
+            (
+                "MANDATORY COMMAND GROUNDING: This is the resolved "
+                "gameplay command for the member's current question. "
+                "Answer using this command and its description."
+            ),
+            (
+                "Do not replace it with generic pirate instructions, "
+                "invented procedures, nonexistent mechanics, or a "
+                "different command."
+            ),
+            (
+                "If this recommendation came from a contextual "
+                "follow-up, treat it as the resolved subject of words "
+                "such as 'that' or 'it'. Older unrelated conversation "
+                "must not override it."
+            ),
+            (
+                "Mention the command naturally and briefly. Do not "
+                "dump unrelated commands."
             ),
         ])
 
@@ -2616,6 +2785,101 @@ async def resolve_authoritative_question(
     return None
 
 
+def extract_authoritative_command_help(
+    gameplay_context
+):
+    """
+    Extract the single Priority 6A authoritative command
+    recommendation from gameplay context.
+
+    Returns:
+        (command, description) or None
+    """
+
+    if not gameplay_context:
+        return None
+
+    if gameplay_context == "NONE":
+        return None
+
+    marker = (
+        "AUTHORITATIVE COMMAND RECOMMENDATION:"
+    )
+
+    if marker not in gameplay_context:
+        return None
+
+    lines = gameplay_context.splitlines()
+
+    try:
+        marker_index = lines.index(marker)
+    except ValueError:
+        return None
+
+    for line in lines[
+        marker_index + 1:
+        marker_index + 8
+    ]:
+
+        line = line.strip()
+
+        if not line.startswith("`!c "):
+            continue
+
+        if "` — " not in line:
+            continue
+
+        command_part, description = (
+            line.split(
+                "` — ",
+                1
+            )
+        )
+
+        command = (
+            command_part
+            .strip()
+            .strip("`")
+        )
+
+        description = (
+            description
+            .strip()
+            .rstrip(".")
+        )
+
+        if (
+            command.startswith("!c ")
+            and description
+        ):
+            return (
+                command,
+                description,
+            )
+
+    return None
+
+
+def format_authoritative_command_reply(
+    command,
+    description
+):
+    """
+    Deterministic Priority 6A response.
+
+    Do not send natural command-help questions through the AI:
+    the command catalog is the authoritative source of truth.
+    """
+
+    return (
+        "Aye, matey. For that, use **`"
+        + command
+        + "`** — "
+        + description
+        + "."
+    )
+
+
 async def analyze_message(
     message,
     conversation,
@@ -2923,8 +3187,20 @@ DIRECT QUESTION:
 Answer the question directly and in character.
 
 GAMEPLAY ANSWER RULE:
-If LIVE GAMEPLAY / SHIP RECORDS contains a relevant command,
-include that command naturally in the answer.
+If LIVE GAMEPLAY / SHIP RECORDS contains
+"AUTHORITATIVE COMMAND RECOMMENDATION", that recommendation is
+mandatory for the current gameplay-help question.
+
+- Answer the gameplay question using that exact command.
+- Do not substitute generic real-world or fictional pirate instructions.
+- Do not invent a different way to perform the gameplay action.
+- Do not invent commands, syntax, requirements, or mechanics.
+- Do not let an older unrelated topic in RECENT CONVERSATION override
+  the authoritative command recommendation.
+- For contextual wording such as "how do I do that?", the authoritative
+  recommendation is the resolved meaning of "that".
+- Keep the answer concise and in Captain Cutlass's voice.
+- Do not dump unrelated commands.
 
 If the member requests a story about this crew's recent
 adventures, use the recorded gameplay events supplied above.
@@ -3135,7 +3411,7 @@ Return ONLY Captain Cutlass's response.
         )
 
         targeted_joke_prompt = f"""
-You are Captain Cutlass, an eccentric 55-year-old pirate.
+You are Captain Cutlass, an eccentric older pirate.
 
 MESSAGE AUTHOR:
 {message.author.display_name}
@@ -3228,7 +3504,7 @@ Return ONLY Captain Cutlass's joke.
     if humor_mode == "HUMOR_REQUEST":
 
         humor_prompt = f"""
-You are Captain Cutlass, an eccentric 55-year-old pirate.
+You are Captain Cutlass, an eccentric older pirate.
 
 MESSAGE AUTHOR:
 {message.author.display_name}
@@ -3478,9 +3754,17 @@ When answering gameplay questions:
   but do not change what actually happened.
 - Maintain continuity with the recent conversation when a
   follow-up clearly refers to the same gameplay subject.
-- If the member appears to need gameplay help, answer naturally
-  in Captain Cutlass's voice and mention a useful command when
-  one is relevant.
+- If LIVE GAMEPLAY / SHIP RECORDS contains an
+  AUTHORITATIVE COMMAND RECOMMENDATION, that recommendation
+  overrides older unrelated conversation topics for the current
+  gameplay-help response.
+- Use the exact recommended command when answering the member.
+- Do not substitute generic pirate instructions or invent a
+  gameplay procedure, command, requirement, or mechanic.
+- For contextual wording such as "how do I do that?", treat the
+  authoritative command recommendation as the resolved meaning
+  of "that".
+- Keep the recommendation natural and in Captain Cutlass's voice.
 - Do not dump commands unnecessarily.
 - Scouting/exploration does not physically move the Living Ship.
 - The ship's Location field represents its actual physical location.
@@ -4510,41 +4794,133 @@ def member_identity_text_is_allowed(
     return True
 
 
-def is_identity_management_message(
-    message_content
-):
+
+def is_identity_management_message(message_content):
     """
-    Detect first-person identity statements, corrections,
-    removals, and pronoun instructions.
+    Return True only when the member is actually managing their OWN
+    identity terms.
 
-    These belong in identity handling, not ordinary memory.
+    This intentionally does not activate for:
+      - third-party identity statements
+      - ordinary questions about identity
+      - malformed pronoun syntax
+      - fictional/hypothetical identity discussion
     """
 
-    import re
+    content = str(message_content or "").strip()
+    lowered = content.lower()
 
-    text = str(
-        message_content or ""
-    ).casefold()
+    if not lowered:
+        return False
 
-    patterns = (
-        r"\bi(?:\s+am|['’]?m)\s+(?:a\s+)?(?:man|woman|male|female|non[- ]?binary|agender|gender[- ]?fluid)\b",
-        r"\bmy gender is\b",
-        r"\bmy pronouns are\b",
-        r"\bi use\s+(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)\b",
-        r"\bforget my (?:gender|pronouns)\b",
-        r"\bremove my (?:gender|pronouns)\b",
-        r"\bclear my (?:gender|pronouns)\b",
-        r"\bdon['’]?t remember my (?:gender|pronouns)\b",
-        r"\bdo not remember my (?:gender|pronouns)\b",
-        r"\bdon['’]?t call me (?:a\s+)?(?:boy|girl|man|woman|he|him|she|her)\b",
-        r"\bdo not call me (?:a\s+)?(?:boy|girl|man|woman|he|him|she|her)\b",
-        r"\bi(?:['’]?m|\s+am)\s+not\s+(?:a\s+)?(?:boy|girl|man|woman|male|female)\b",
-    )
+    # --------------------------------------------------------
+    # Explicit valid first-person pronoun declarations
+    # --------------------------------------------------------
 
-    return any(
-        re.search(pattern, text)
-        for pattern in patterns
-    )
+    pronoun_declaration_patterns = [
+        r"\bmy\s+pronouns\s+are\s+"
+        r"(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)"
+        r"(?:[.!]|$)",
+
+        r"\bi\s+use\s+"
+        r"(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)"
+        r"(?:\s+pronouns?)?(?:[.!]|$)",
+
+        r"\bplease\s+use\s+"
+        r"(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)"
+        r"\s+(?:for\s+me|pronouns?)\b",
+    ]
+
+    for pattern in pronoun_declaration_patterns:
+        if re.search(
+            pattern,
+            lowered,
+            re.IGNORECASE
+        ):
+            return True
+
+    # --------------------------------------------------------
+    # Explicit first-person gender declarations
+    # --------------------------------------------------------
+
+    gender_declaration_patterns = [
+        r"\bi\s+am\s+(?:a\s+)?"
+        r"(?:man|woman|boy|girl|male|female)"
+        r"(?:[.!]|$)",
+
+        r"\bi['’]m\s+(?:a\s+)?"
+        r"(?:man|woman|boy|girl|male|female)"
+        r"(?:[.!]|$)",
+
+        r"\bmy\s+gender\s+is\s+"
+        r"(?:man|woman|male|female)"
+        r"(?:[.!]|$)",
+    ]
+
+    for pattern in gender_declaration_patterns:
+        if re.search(
+            pattern,
+            lowered,
+            re.IGNORECASE
+        ):
+            return True
+
+    # --------------------------------------------------------
+    # Explicit removal / forgetting
+    # --------------------------------------------------------
+
+    removal_patterns = [
+        r"\bforget\s+my\s+pronouns\b",
+        r"\bclear\s+my\s+pronouns\b",
+        r"\bremove\s+my\s+pronouns\b",
+        r"\bforget\s+my\s+gender\b",
+        r"\bclear\s+my\s+gender\b",
+        r"\bremove\s+my\s+gender\b",
+    ]
+
+    for pattern in removal_patterns:
+        if re.search(
+            pattern,
+            lowered,
+            re.IGNORECASE
+        ):
+            return True
+
+    # --------------------------------------------------------
+    # Explicit corrections / objections
+    #
+    # These activate safety but DO NOT imply replacement identity.
+    # --------------------------------------------------------
+
+    correction_patterns = [
+        r"\bdon['’]?t\s+call\s+me\s+(?:a\s+)?"
+        r"(?:man|woman|boy|girl|male|female)\b",
+
+        r"\bdo\s+not\s+call\s+me\s+(?:a\s+)?"
+        r"(?:man|woman|boy|girl|male|female)\b",
+
+        r"\bstop\s+calling\s+me\s+(?:a\s+)?"
+        r"(?:man|woman|boy|girl|male|female)\b",
+
+        r"\bdon['’]?t\s+use\s+"
+        r"(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)"
+        r"\s+(?:for\s+me|on\s+me)\b",
+
+        r"\bdo\s+not\s+use\s+"
+        r"(?:he\s*/\s*him|she\s*/\s*her|they\s*/\s*them)"
+        r"\s+(?:for\s+me|on\s+me)\b",
+    ]
+
+    for pattern in correction_patterns:
+        if re.search(
+            pattern,
+            lowered,
+            re.IGNORECASE
+        ):
+            return True
+
+    return False
+
 
 
 def extract_explicit_user_identity(message_content):
@@ -5588,7 +5964,10 @@ async def handle_commands(
     # -----------------------------------------------------
 
     if command == "!c":
-        command = "!cutlass"
+        # Bare !c is the natural entry point into Captain's
+        # command system rather than an unknown command.
+        command = "!cutlass help"
+        content = "!cutlass help"
 
     elif command.startswith("!c "):
         command = (
@@ -5759,6 +6138,23 @@ async def handle_commands(
 
 
 
+    # -----------------------------------------------------
+    # Captain tickle interaction
+    #
+    # This is intentionally handled outside the AI/gameplay systems.
+    # -----------------------------------------------------
+
+    if await handle_tickle_command(
+        message,
+        command,
+        get_tickle_count=get_tickle_count,
+        increment_tickle_count=increment_tickle_count,
+        get_relationship=get_relationship,
+        is_creator=is_creator
+    ):
+        return True
+
+
     if await handle_parrot_command(
         message,
         content,
@@ -5898,7 +6294,10 @@ async def handle_commands(
         damage_ship=damage_ship,
         reward_ship=_reward_ship_unlocked,
         add_ship_history=add_ship_history,
-        post_captains_log=post_captains_log
+        post_captains_log=post_captains_log,
+        force_withdraw_battle=force_withdraw_battle,
+        force_withdraw_monster=force_withdraw_monster,
+        force_withdraw_boss=force_withdraw_boss,
     ):
         return True
 
@@ -6008,6 +6407,65 @@ async def handle_commands(
 
 
 
+
+    # -----------------------------------------------------
+    # Priority 6A unknown-command fallback
+    #
+    # At this point the message definitely began with
+    # !cutlass but no real handler accepted it.
+    #
+    # Suggest only commands from the authoritative Crew-safe
+    # command catalog. Admiralty/configuration commands are
+    # intentionally not surfaced here.
+    # -----------------------------------------------------
+
+    suggestions = command_suggestions(
+        command,
+        limit=3,
+    )
+
+    if suggestions:
+
+        if len(suggestions) == 1:
+            reply = (
+                "Arrr, I don't recognize that command. "
+                "Did ye mean **`"
+                + suggestions[0]["command"]
+                + "`**? "
+                + suggestions[0]["description"]
+                + "."
+            )
+
+        else:
+            lines = [
+                "Arrr, I don't recognize that command. "
+                "Closest things aboard be:"
+            ]
+
+            for suggestion in suggestions:
+                lines.append(
+                    "• **`"
+                    + suggestion["command"]
+                    + "`** — "
+                    + suggestion["description"]
+                )
+
+            reply = "\n".join(lines)
+
+        await message.reply(
+            reply,
+            mention_author=False,
+        )
+
+        return True
+
+    await message.reply(
+        "Arrr, that command isn't in me charts. "
+        "Try **`!c help`** and I'll point ye in the right direction.",
+        mention_author=False,
+    )
+
+    return True
 
     return False
 
@@ -7130,6 +7588,9 @@ async def enforce_reply_identity_safety(
 
         elif (
             target is None
+            and is_identity_management_message(
+                message.content
+            )
             and not profile_allows_binary_reply_pronouns(
                 author_profile,
                 reply
@@ -7494,6 +7955,28 @@ async def on_message(
                 return
 
 
+        # -------------------------------------------------
+        # Natural Captain tickle interaction.
+        #
+        # Commands were already handled above. Clear conversational
+        # tickle actions are intercepted here BEFORE random reply
+        # cooldowns and BEFORE the AI brain so tickling can never be
+        # misrouted as gameplay, identity management, or ordinary AI.
+        # -------------------------------------------------
+
+        if is_natural_tickle_message(
+            message.content
+        ):
+            await perform_tickle(
+                message,
+                get_tickle_count=get_tickle_count,
+                increment_tickle_count=increment_tickle_count,
+                get_relationship=get_relationship,
+                is_creator=is_creator
+            )
+            return
+
+
         await save_message(
             message.guild.id,
             message.channel.id,
@@ -7644,8 +8127,73 @@ async def on_message(
         )
 
 
+        # -----------------------------------------------------
+        # Priority 6A deterministic natural command help
+        #
+        # If the authoritative resolver selected a real command,
+        # answer from the command catalog directly instead of
+        # asking the AI to reconstruct gameplay instructions.
+        #
+        # This prevents:
+        # - invented gameplay mechanics
+        # - stale conversation-topic contamination
+        # - outdated/nonexistent command recommendations
+        # -----------------------------------------------------
+
+        authoritative_help = (
+            extract_authoritative_command_help(
+                gameplay_context
+            )
+        )
+
+        if authoritative_help:
+
+            (
+                help_command,
+                help_description,
+            ) = authoritative_help
+
+            help_reply = (
+                format_authoritative_command_reply(
+                    help_command,
+                    help_description,
+                )
+            )
+
+            async with message.channel.typing():
+
+                await message.reply(
+                    help_reply[:1900],
+                    mention_author=False
+                )
+
+            await save_message(
+                message.guild.id,
+                message.channel.id,
+                bot.user.id,
+                bot.user.display_name,
+                help_reply
+            )
+
+            if not force_reply:
+
+                last_spontaneous_reply[
+                    message.channel.id
+                ] = time.time()
+
+            return
+
         humor_mode = detect_humor_mode(message)
-        direct_question_mode = detect_direct_question_mode(message)
+
+        # Humor-specific routing takes precedence over the broad
+        # direct-question detector. A joke, pun, roast request,
+        # absurd hypothetical, or "who would win" question must
+        # reach its dedicated conversational handler rather than
+        # being swallowed by generic question/gameplay routing.
+        direct_question_mode = (
+            detect_direct_question_mode(message)
+            and humor_mode == "NORMAL"
+        )
 
         result = await analyze_message(
             message,

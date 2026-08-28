@@ -231,13 +231,25 @@ async def handle_help_command(
         embed.add_field(
             name="Ship Commands",
             value=(
-                "`!c ship` — Current ship status\n"
+                "`!c ship` — Status, hull, recovery, and level\n"
                 "`!c ship history` — Recorded ship history\n"
                 "`!c ship treasury` — Treasury\n"
                 "`!c ship donate <amount>` — Donate Doubloons\n"
                 "`!c ship repair` — Repair the ship\n"
                 "`!c ship upgrades` — View upgrades\n"
                 "`!c ship upgrade <name>` — Purchase an upgrade"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Recovery & Crew Support",
+            value=(
+                "If the Living Ship falls below operational hull, "
+                "combat and other ship actions are locked until she "
+                "recovers. Emergency recovery restores hull over time.\n\n"
+                "Crew donations build persistent contribution totals. "
+                "Contribution milestones can award bonus Doubloons."
             ),
             inline=False
         )
@@ -320,13 +332,27 @@ async def handle_help_command(
         embed.add_field(
             name="Unified Combat",
             value=(
-                "`!c attack` — Attack the active encounter\n"
-                "`!c defend` — Defend when supported\n"
-                "`!c board` — Board an enemy vessel when supported\n"
-                "`!c flee` — Attempt to flee when supported\n\n"
+                "`!c attack` — Reliable offensive action\n"
+                "`!c defend` — Defensive action in naval or boss combat\n"
+                "`!c board` — Capture a naval enemy at 35% hull or lower\n"
+                "`!c flee` — Attempt to escape a naval battle\n\n"
+                "Combat automatically targets the active naval battle, "
+                "sea monster, or boss. Actions have different tactical "
+                "strengths, risks, and encounter restrictions."
+            ),
+            inline=False
+        )
 
-                "Combat automatically targets the active naval "
-                "battle, sea monster, or boss encounter."
+        embed.add_field(
+            name="Ship Combat Abilities",
+            value=(
+                "`!c abilities` — View abilities and cooldowns\n"
+                "`!c ability <name>` — Activate an ability\n\n"
+                "**Full Broadside** — +50% next outgoing attack\n"
+                "**Brace for Impact** — -50% next incoming damage\n"
+                "**Emergency Repairs** — Restore 10% max hull in combat\n"
+                "**Rally the Crew** — +25% outgoing and -25% incoming\n\n"
+                "Ability cooldowns advance through valid combat turns."
             ),
             inline=False
         )
@@ -337,6 +363,19 @@ async def handle_help_command(
                 "`!c battle` — Current naval battle\n"
                 "`!c monster` — Current sea monster encounter\n"
                 "`!c boss` — Current legendary boss encounter"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Combat Systems",
+            value=(
+                "Naval battles can trigger random combat events. "
+                "Sea monsters and legendary bosses grow more dangerous "
+                "as their phases change. Victories can unlock combat "
+                "achievements.\n\n"
+                "If the Living Ship becomes non-operational during combat, "
+                "the encounter ends automatically and emergency recovery begins."
             ),
             inline=False
         )
@@ -492,9 +531,11 @@ async def handle_help_command(
             (
                 "**Combat**\n"
                 "`!c attack` — Attack active encounter\n"
-                "`!c defend` — Defend when supported\n"
-                "`!c board` — Board when supported\n"
-                "`!c flee` — Flee when supported\n"
+                "`!c defend` — Defend in naval or boss combat\n"
+                "`!c board` — Board naval enemy at ≤35% hull\n"
+                "`!c flee` — Attempt to escape naval combat\n"
+                "`!c abilities` — Abilities and cooldowns\n"
+                "`!c ability <name>` — Activate ability\n"
                 "`!c battle` — Naval battle status\n"
                 "`!c monster` — Monster status\n"
                 "`!c boss` — Boss status"
