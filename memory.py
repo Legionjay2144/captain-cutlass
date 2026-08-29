@@ -828,7 +828,7 @@ async def save_message(
 
     async with _write_lock:
 
-        await db.execute("""
+        cursor = await db.execute("""
             INSERT INTO messages (
                 guild_id,
                 channel_id,
@@ -847,27 +847,49 @@ async def save_message(
 
         await db.commit()
 
+        return cursor.lastrowid
+
 
 async def get_recent_messages(
     guild_id,
     channel_id,
-    limit=10
+    limit=10,
+    max_message_id=None
 ):
 
     db = await get_db()
 
-    cursor = await db.execute("""
-        SELECT username, content
-        FROM messages
-        WHERE guild_id = ?
-        AND channel_id = ?
-        ORDER BY id DESC
-        LIMIT ?
-    """, (
-        guild_id,
-        channel_id,
-        limit
-    ))
+    if max_message_id is None:
+
+        cursor = await db.execute("""
+            SELECT username, content
+            FROM messages
+            WHERE guild_id = ?
+            AND channel_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, (
+            guild_id,
+            channel_id,
+            limit
+        ))
+
+    else:
+
+        cursor = await db.execute("""
+            SELECT username, content
+            FROM messages
+            WHERE guild_id = ?
+            AND channel_id = ?
+            AND id <= ?
+            ORDER BY id DESC
+            LIMIT ?
+        """, (
+            guild_id,
+            channel_id,
+            max_message_id,
+            limit
+        ))
 
     rows = await cursor.fetchall()
 
@@ -2582,20 +2604,27 @@ async def finish_treasure_hunt(
 
     async with _write_lock:
 
-        await db.execute("""
+        cursor = await db.execute("""
             UPDATE treasure_hunts
             SET active = 0,
                 winner_id = ?,
                 winner_name = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE guild_id = ?
+              AND active = 1
         """, (
             winner_id,
             winner_name,
             guild_id
         ))
 
+        claimed = (
+            cursor.rowcount == 1
+        )
+
         await db.commit()
+
+        return claimed
 
 
 async def get_stats(

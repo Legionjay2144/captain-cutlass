@@ -465,6 +465,18 @@ async def _get_ship_raw(guild_id):
         await db.close()
 
 
+async def apply_passive_recovery(guild_id):
+    """
+    Atomically apply passive hull recovery earned through
+    elapsed real time for one guild.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _apply_passive_recovery_unlocked(
+            guild_id
+        )
+
+
 async def get_ship(guild_id):
     """
     Return the Living Ship after applying any passive
@@ -534,7 +546,7 @@ def _parse_db_timestamp(value):
         return None
 
 
-async def apply_passive_recovery(guild_id):
+async def _apply_passive_recovery_unlocked(guild_id):
     """
     Apply passive hull recovery earned through elapsed real time.
 
@@ -2536,7 +2548,7 @@ async def format_upgrades(guild_id):
 # Living Ship Combat API
 # =========================================================
 
-async def damage_ship(guild_id, amount):
+async def _damage_ship_unlocked(guild_id, amount):
     """
     Apply real combat damage to the Living Ship.
 
@@ -2640,6 +2652,21 @@ async def damage_ship(guild_id, amount):
     return await get_ship(
         guild_id
     )
+
+async def damage_ship(guild_id, amount):
+    """
+    Apply serialized combat damage to the Living Ship.
+
+    The complete hull read/modify/write operation is
+    protected by the shared guild Ship World lock.
+    """
+    async with get_guild_lock(guild_id):
+        return await _damage_ship_unlocked(
+            guild_id,
+            amount
+        )
+
+
 
 
 async def _reward_ship_unlocked(

@@ -137,11 +137,21 @@ async def check_treasure_answer(
     ):
         return False
 
-    await finish_treasure_hunt(
+    claimed = await finish_treasure_hunt(
         message.guild.id,
         message.author.id,
         message.author.display_name
     )
+
+    if not claimed:
+        await message.reply(
+            (
+                "Too late, matey — another crewmate "
+                "claimed that treasure first."
+            ),
+            mention_author=False
+        )
+        return True
 
     await add_doubloons(
         message.guild.id,

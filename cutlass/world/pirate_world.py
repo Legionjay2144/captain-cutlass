@@ -591,41 +591,42 @@ async def get_island_activity_state(
 
 async def record_island_visit(
     guild_id,
-    location_key
+    location_key,
+    cooldown_seconds=30 * 60
 ):
+    """
+    Atomically claim one physical island exploration.
+
+    Exactly one caller may advance the visit counter during
+    a cooldown window. Race losers receive the current state
+    without incrementing visits or resetting the cooldown.
+    """
+
+    cooldown_seconds = max(
+        0,
+        int(cooldown_seconds)
+    )
+
     db = await _db()
 
     try:
         await db.execute(
-            """
-            INSERT INTO island_activity_state (
-                guild_id,
-                location_key,
-                visits,
-                last_explored_at
-            )
-            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-
-            ON CONFLICT(
-                guild_id,
-                location_key
-            )
-            DO UPDATE SET
-                visits = visits + 1,
-                last_explored_at = CURRENT_TIMESTAMP
-            """,
-            (
-                guild_id,
-                location_key,
-            )
+            "BEGIN IMMEDIATE"
         )
-
-        await db.commit()
 
         row = await (
             await db.execute(
                 """
-                SELECT visits
+                SELECT
+                    visits,
+                    last_explored_at,
+                    CAST(
+                        (
+                            julianday('now')
+                            - julianday(last_explored_at)
+                        ) * 86400
+                        AS INTEGER
+                    ) AS elapsed_seconds
                 FROM island_activity_state
                 WHERE guild_id = ?
                   AND location_key = ?
@@ -637,7 +638,80 @@ async def record_island_visit(
             )
         ).fetchone()
 
-        return int(row["visits"])
+        if row:
+            elapsed = (
+                int(row["elapsed_seconds"])
+                if row["elapsed_seconds"] is not None
+                else cooldown_seconds
+            )
+
+            if elapsed < cooldown_seconds:
+                await db.rollback()
+
+                return {
+                    "claimed": False,
+                    "visits": int(row["visits"]),
+                    "last_explored_at": row[
+                        "last_explored_at"
+                    ],
+                    "remaining_seconds": max(
+                        1,
+                        cooldown_seconds - elapsed
+                    ),
+                }
+
+            visits = int(row["visits"]) + 1
+
+            await db.execute(
+                """
+                UPDATE island_activity_state
+                SET visits = ?,
+                    last_explored_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                  AND location_key = ?
+                """,
+                (
+                    visits,
+                    guild_id,
+                    location_key,
+                )
+            )
+
+        else:
+            visits = 1
+
+            await db.execute(
+                """
+                INSERT INTO island_activity_state (
+                    guild_id,
+                    location_key,
+                    visits,
+                    last_explored_at
+                )
+                VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+                """,
+                (
+                    guild_id,
+                    location_key,
+                )
+            )
+
+        await db.commit()
+
+        return {
+            "claimed": True,
+            "visits": visits,
+            "last_explored_at": None,
+            "remaining_seconds": 0,
+        }
+
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
+        raise
 
     finally:
         await db.close()

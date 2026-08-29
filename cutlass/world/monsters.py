@@ -109,6 +109,23 @@ async def initialize_monsters():
         await db.close()
 
 
+async def attack_monster(
+    guild_id,
+    ship=None,
+    damage_multiplier=1.0
+):
+    """
+    Perform one atomic monster attack for a guild.
+    """
+
+    async with get_guild_lock(guild_id):
+        return await _attack_monster_unlocked(
+            guild_id,
+            ship=ship,
+            damage_multiplier=damage_multiplier,
+        )
+
+
 async def get_active_monster(guild_id):
 
     db = await _db()
@@ -713,7 +730,7 @@ async def record_monster_phase_change(
     return True
 
 
-async def attack_monster(
+async def _attack_monster_unlocked(
     guild_id,
     ship=None,
     damage_multiplier=1.0
@@ -850,9 +867,11 @@ async def attack_monster(
             )
         )
 
+        victory_claimed = False
+
         if hp <= 0:
 
-            await db.execute(
+            cursor = await db.execute(
                 """
                 UPDATE monster_encounters
                 SET status = 'victory',
@@ -865,6 +884,10 @@ async def attack_monster(
                 )
             )
 
+            victory_claimed = (
+                cursor.rowcount == 1
+            )
+
         await db.commit()
 
     finally:
@@ -875,6 +898,13 @@ async def attack_monster(
     # -----------------------------------------------------
 
     if hp <= 0:
+
+        if not victory_claimed:
+            return (
+                False,
+                "The monster encounter has already ended.",
+                None
+            )
 
         reward = random.randint(
             int(encounter["reward_min"]),

@@ -1144,9 +1144,11 @@ async def _attack_enemy_unlocked(
             )
         )
 
+        victory_claimed = False
+
         if enemy_hull <= 0:
 
-            await db.execute(
+            cursor = await db.execute(
                 """
                 UPDATE naval_battles
                 SET status = 'victory',
@@ -1159,13 +1161,28 @@ async def _attack_enemy_unlocked(
                 )
             )
 
+            victory_claimed = (
+                cursor.rowcount == 1
+            )
+
         await db.commit()
 
     finally:
         await db.close()
 
-    # Record the random event independently from the
-    # ordinary attack/victory event.
+    # -----------------------------------------------------
+    # TERMINAL OWNERSHIP
+    # -----------------------------------------------------
+
+    if enemy_hull <= 0 and not victory_claimed:
+        return (
+            False,
+            "The battle has already ended.",
+            None
+        )
+
+    # Record the random event only after this action has
+    # confirmed it still owns any terminal transition.
     await record_naval_combat_event(
         battle,
         guild_id,
@@ -1392,9 +1409,11 @@ async def _defend_unlocked(
             )
         )
 
+        victory_claimed = False
+
         if enemy_hull <= 0:
 
-            await db.execute(
+            cursor = await db.execute(
                 """
                 UPDATE naval_battles
                 SET status = 'victory',
@@ -1407,10 +1426,21 @@ async def _defend_unlocked(
                 )
             )
 
+            victory_claimed = (
+                cursor.rowcount == 1
+            )
+
         await db.commit()
 
     finally:
         await db.close()
+
+    if enemy_hull <= 0 and not victory_claimed:
+        return (
+            False,
+            "The battle has already ended.",
+            None
+        )
 
     await record_naval_combat_event(
         battle,
@@ -1714,19 +1744,31 @@ async def _board_enemy_unlocked(
 
     try:
 
-        await db.execute("""
+        cursor = await db.execute("""
             UPDATE naval_battles
             SET status = 'boarded',
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
+              AND status = 'active'
         """, (
             battle["id"],
         ))
+
+        changed = (
+            cursor.rowcount == 1
+        )
 
         await db.commit()
 
     finally:
         await db.close()
+
+    if not changed:
+        return (
+            False,
+            "The battle is no longer active.",
+            None
+        )
 
     await add_battle_event(
         battle["id"],

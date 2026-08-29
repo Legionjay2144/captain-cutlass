@@ -690,13 +690,15 @@ async def cached_settings(
 
 
 async def build_conversation(
-    message
+    message,
+    max_message_id=None
 ):
 
     rows = await get_recent_messages(
         message.guild.id,
         message.channel.id,
-        CONTEXT_MESSAGES
+        CONTEXT_MESSAGES,
+        max_message_id=max_message_id
     )
 
     return "\n".join(
@@ -1192,9 +1194,9 @@ async def resolve_joke_target(message):
         if bot.user and member.id == bot.user.id:
             continue
 
-        if member.id == message.author.id:
-            continue
-
+        # Explicit mentions are authoritative for conversational
+        # member targeting, including when someone asks Captain
+        # about themselves.
         return member
 
 
@@ -1304,6 +1306,42 @@ async def resolve_joke_target(message):
 
 
     return None
+
+
+def is_member_profile_request(message):
+    """
+    Return True only when the current message explicitly asks
+    Captain for information, knowledge, or an opinion about a
+    Discord member.
+
+    A member mention by itself is NOT a profile request.
+    """
+
+    content = message.content.strip()
+
+    if bot.user:
+        content = re.sub(
+            rf"<@!?{bot.user.id}>",
+            "",
+            content
+        ).strip()
+
+    patterns = (
+        r"\bwhat\s+do\s+you\s+think\s+(?:about|of)\b",
+        r"\bwhat\s+do\s+you\s+know\s+about\b",
+        r"\btell\s+me\s+(?:something|anything|a\s+few\s+words)\s+about\b",
+        r"\bsay\s+(?:something|anything|a\s+few\s+words)\s+about\b",
+        r"\btell\s+me\s+about\b",
+    )
+
+    return any(
+        re.search(
+            pattern,
+            content,
+            flags=re.IGNORECASE
+        )
+        for pattern in patterns
+    )
 
 
 async def build_target_member_context(message):
@@ -3624,6 +3662,36 @@ MESSAGE AUTHOR:
 TARGET MEMBER CONTEXT:
 
 {target_context}
+
+TARGET MEMBER INTENT:
+
+{"PROFILE_REQUEST" if is_member_profile_request(message) else "REFERENCE_ONLY"}
+
+TARGET MEMBER INTENT RULE:
+
+A Discord member appearing in TARGET MEMBER CONTEXT does NOT
+automatically mean the user asked Captain to describe that person.
+
+If TARGET MEMBER INTENT is REFERENCE_ONLY:
+- Treat the target member as a participant or subject referenced by
+  the current message.
+- Answer the actual question or statement in MESSAGE.
+- Do NOT replace the answer with the target's profile, relationship,
+  familiarity, memories, achievements, or a generic description.
+- Use target-member facts only when directly relevant to answering
+  the actual question.
+- A sentence such as "Can @Member keep the treasures?" is asking
+  whether that member may keep the treasures. Answer that question.
+- A sentence such as "Should @Member attack the monster?" is asking
+  about the proposed action. Answer that question.
+- A sentence such as "Is @Member coming with us?" is asking about
+  the situation, not asking for a member biography.
+
+If TARGET MEMBER INTENT is PROFILE_REQUEST:
+- The user explicitly asked what Captain knows, remembers, or thinks
+  about that member.
+- TARGET MEMBER CONTEXT may be used to answer that request.
+- Never invent missing personal facts.
 
 HUMOR MODE:
 
@@ -6059,6 +6127,7 @@ async def handle_commands(
         get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
+        get_active_boss=get_active_boss,
         explore_random_island=explore_random_island,
         start_naval_battle=start_naval_battle,
         start_monster_encounter=start_monster_encounter,
@@ -7807,7 +7876,7 @@ async def on_message(
             return
 
 
-        await save_message(
+        conversation_message_id = await save_message(
             message.guild.id,
             message.channel.id,
             message.author.id,
@@ -7983,7 +8052,8 @@ async def on_message(
         ) = await asyncio.gather(
 
             build_conversation(
-                message
+                message,
+                max_message_id=conversation_message_id
             ),
 
             build_member_context(
