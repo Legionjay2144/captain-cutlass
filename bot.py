@@ -1628,62 +1628,6 @@ async def build_gameplay_context(
     )
 
     # -----------------------------------------------------
-    # Priority 6A contextual command-help continuity
-    #
-    # get_recent_messages() returns oldest -> newest.
-    # find_contextual_command_help() expects newest-first,
-    # so reverse the recent rows deliberately.
-    #
-    # This only activates for explicit command/help follow-ups
-    # such as "how do I do that?" or "what command was that?"
-    # Normal conversation remains untouched.
-    # -----------------------------------------------------
-
-    contextual_help = None
-
-    if is_contextual_help_followup(
-        message.content
-    ):
-
-        recent_for_help = await get_recent_messages(
-            message.guild.id,
-            message.channel.id,
-            8
-        )
-
-        # Priority 6A contextual command help should resolve
-        # against crew messages, not Captain's generated replies.
-        #
-        # Captain may mention broad gameplay words such as "ship"
-        # while responding conversationally. Feeding those replies
-        # back into the command resolver can incorrectly override the
-        # member's actual subject:
-        #
-        # member: "we need to repair the ship"
-        # Captain: "...this ship..."
-        # member: "how do I do that?"
-        #
-        # The authoritative help subject should remain "repair".
-        recent_help_text = [
-            str(row[1])
-            for row in reversed(
-                recent_for_help
-            )
-            if str(row[0]) not in {
-                str(bot.user.display_name),
-                str(bot.user.name),
-            }
-        ]
-
-        contextual_help = find_contextual_command_help(
-            message.content,
-            recent_help_text,
-        )
-
-        if contextual_help:
-            gameplay_detected = True
-
-    # -----------------------------------------------------
     # Follow-up continuity
     #
     # "What about the one before that?" contains no obvious
@@ -1983,65 +1927,6 @@ async def build_gameplay_context(
             lines.append(
                 "- No recorded world events."
             )
-
-    # -----------------------------------------------------
-    # Authoritative natural gameplay command help
-    #
-    # Command recommendations come from the same tested
-    # command catalog rather than being duplicated here.
-    # This prevents stale or invented command syntax.
-    # -----------------------------------------------------
-
-    natural_help = find_natural_command_help(
-        message.content
-    )
-
-    # A short follow-up such as "how do I do that?" has no
-    # command topic in the sentence itself. In that case use
-    # the newest authoritative gameplay topic found above.
-    if (
-        natural_help is None
-        and contextual_help is not None
-    ):
-        natural_help = contextual_help
-
-    if natural_help:
-
-        lines.extend([
-            "",
-            "AUTHORITATIVE COMMAND RECOMMENDATION:",
-            (
-                "`"
-                + natural_help["command"]
-                + "` — "
-                + natural_help["description"]
-                + "."
-            ),
-            (
-                "This command exists in Captain Cutlass's "
-                "authoritative command-help catalog."
-            ),
-            (
-                "MANDATORY COMMAND GROUNDING: This is the resolved "
-                "gameplay command for the member's current question. "
-                "Answer using this command and its description."
-            ),
-            (
-                "Do not replace it with generic pirate instructions, "
-                "invented procedures, nonexistent mechanics, or a "
-                "different command."
-            ),
-            (
-                "If this recommendation came from a contextual "
-                "follow-up, treat it as the resolved subject of words "
-                "such as 'that' or 'it'. Older unrelated conversation "
-                "must not override it."
-            ),
-            (
-                "Mention the command naturally and briefly. Do not "
-                "dump unrelated commands."
-            ),
-        ])
 
     if wants_story:
 
@@ -2785,79 +2670,51 @@ async def resolve_authoritative_question(
     return None
 
 
-def extract_authoritative_command_help(
-    gameplay_context
+async def resolve_authoritative_command_help(
+    message
 ):
     """
-    Extract the single Priority 6A authoritative command
-    recommendation from gameplay context.
+    Resolve natural gameplay command help directly from the
+    authoritative Crew-safe command catalog.
 
-    Returns:
-        (command, description) or None
+    No AI call, prompt serialization, or string parsing is used.
     """
 
-    if not gameplay_context:
-        return None
-
-    if gameplay_context == "NONE":
-        return None
-
-    marker = (
-        "AUTHORITATIVE COMMAND RECOMMENDATION:"
+    natural_help = find_natural_command_help(
+        message.content
     )
 
-    if marker not in gameplay_context:
+    if natural_help is not None:
+        return natural_help
+
+    if not is_contextual_help_followup(
+        message.content
+    ):
         return None
 
-    lines = gameplay_context.splitlines()
+    recent_for_help = await get_recent_messages(
+        message.guild.id,
+        message.channel.id,
+        8
+    )
 
-    try:
-        marker_index = lines.index(marker)
-    except ValueError:
-        return None
-
-    for line in lines[
-        marker_index + 1:
-        marker_index + 8
-    ]:
-
-        line = line.strip()
-
-        if not line.startswith("`!c "):
-            continue
-
-        if "` — " not in line:
-            continue
-
-        command_part, description = (
-            line.split(
-                "` — ",
-                1
-            )
+    # Search newest-first and ignore Captain's own generated
+    # replies so they cannot overwrite the crew member's topic.
+    recent_help_text = [
+        str(row[1])
+        for row in reversed(
+            recent_for_help
         )
+        if str(row[0]) not in {
+            str(bot.user.display_name),
+            str(bot.user.name),
+        }
+    ]
 
-        command = (
-            command_part
-            .strip()
-            .strip("`")
-        )
-
-        description = (
-            description
-            .strip()
-            .rstrip(".")
-        )
-
-        if (
-            command.startswith("!c ")
-            and description
-        ):
-            return (
-                command,
-                description,
-            )
-
-    return None
+    return find_contextual_command_help(
+        message.content,
+        recent_help_text,
+    )
 
 
 def format_authoritative_command_reply(
@@ -3185,22 +3042,6 @@ DIRECT QUESTION:
 {message.content[:1200]}
 
 Answer the question directly and in character.
-
-GAMEPLAY ANSWER RULE:
-If LIVE GAMEPLAY / SHIP RECORDS contains
-"AUTHORITATIVE COMMAND RECOMMENDATION", that recommendation is
-mandatory for the current gameplay-help question.
-
-- Answer the gameplay question using that exact command.
-- Do not substitute generic real-world or fictional pirate instructions.
-- Do not invent a different way to perform the gameplay action.
-- Do not invent commands, syntax, requirements, or mechanics.
-- Do not let an older unrelated topic in RECENT CONVERSATION override
-  the authoritative command recommendation.
-- For contextual wording such as "how do I do that?", the authoritative
-  recommendation is the resolved meaning of "that".
-- Keep the answer concise and in Captain Cutlass's voice.
-- Do not dump unrelated commands.
 
 If the member requests a story about this crew's recent
 adventures, use the recorded gameplay events supplied above.
@@ -3754,18 +3595,6 @@ When answering gameplay questions:
   but do not change what actually happened.
 - Maintain continuity with the recent conversation when a
   follow-up clearly refers to the same gameplay subject.
-- If LIVE GAMEPLAY / SHIP RECORDS contains an
-  AUTHORITATIVE COMMAND RECOMMENDATION, that recommendation
-  overrides older unrelated conversation topics for the current
-  gameplay-help response.
-- Use the exact recommended command when answering the member.
-- Do not substitute generic pirate instructions or invent a
-  gameplay procedure, command, requirement, or mechanic.
-- For contextual wording such as "how do I do that?", treat the
-  authoritative command recommendation as the resolved meaning
-  of "that".
-- Keep the recommendation natural and in Captain Cutlass's voice.
-- Do not dump commands unnecessarily.
 - Scouting/exploration does not physically move the Living Ship.
 - The ship's Location field represents its actual physical location.
 
@@ -6012,7 +5841,8 @@ async def handle_commands(
         message,
         command,
         get_parrot=get_parrot,
-        get_ship=get_ship
+        get_ship=get_ship,
+        is_admin=is_admin
     ):
         return True
 
@@ -8097,6 +7927,53 @@ async def on_message(
                 return
 
 
+        # -----------------------------------------------------
+        # Deterministic natural command help
+        #
+        # Resolve directly from the authoritative command catalog
+        # before building AI/world context. Natural command help
+        # never needs an AI call.
+        # -----------------------------------------------------
+
+        authoritative_help = (
+            await resolve_authoritative_command_help(
+                message
+            )
+        )
+
+        if authoritative_help:
+
+            help_reply = (
+                format_authoritative_command_reply(
+                    authoritative_help["command"],
+                    authoritative_help["description"],
+                )
+            )
+
+            async with message.channel.typing():
+
+                await message.reply(
+                    help_reply[:1900],
+                    mention_author=False
+                )
+
+            await save_message(
+                message.guild.id,
+                message.channel.id,
+                bot.user.id,
+                bot.user.display_name,
+                help_reply
+            )
+
+            if not force_reply:
+
+                last_spontaneous_reply[
+                    message.channel.id
+                ] = time.time()
+
+            return
+
+
         (
             conversation,
             member_context,
@@ -8126,62 +8003,6 @@ async def on_message(
             )
         )
 
-
-        # -----------------------------------------------------
-        # Priority 6A deterministic natural command help
-        #
-        # If the authoritative resolver selected a real command,
-        # answer from the command catalog directly instead of
-        # asking the AI to reconstruct gameplay instructions.
-        #
-        # This prevents:
-        # - invented gameplay mechanics
-        # - stale conversation-topic contamination
-        # - outdated/nonexistent command recommendations
-        # -----------------------------------------------------
-
-        authoritative_help = (
-            extract_authoritative_command_help(
-                gameplay_context
-            )
-        )
-
-        if authoritative_help:
-
-            (
-                help_command,
-                help_description,
-            ) = authoritative_help
-
-            help_reply = (
-                format_authoritative_command_reply(
-                    help_command,
-                    help_description,
-                )
-            )
-
-            async with message.channel.typing():
-
-                await message.reply(
-                    help_reply[:1900],
-                    mention_author=False
-                )
-
-            await save_message(
-                message.guild.id,
-                message.channel.id,
-                bot.user.id,
-                bot.user.display_name,
-                help_reply
-            )
-
-            if not force_reply:
-
-                last_spontaneous_reply[
-                    message.channel.id
-                ] = time.time()
-
-            return
 
         humor_mode = detect_humor_mode(message)
 

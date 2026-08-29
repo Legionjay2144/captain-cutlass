@@ -460,6 +460,119 @@ def help_intent_priority(key):
     )
 
 
+# -------------------------------------------------------------
+# Shared explicit natural-help intent phrases
+#
+# Both direct questions and contextual follow-ups use this table.
+# Keeping one authoritative mapping prevents the two resolvers
+# from drifting apart as gameplay commands evolve.
+# -------------------------------------------------------------
+
+HELP_ACTION_INTENTS = (
+    # Specific combat abilities.
+    ("emergency repairs", "emergency_repairs"),
+    ("emergency repair", "emergency_repairs"),
+    ("brace for impact", "brace"),
+    ("full broadside", "broadside"),
+    ("rally the crew", "rally"),
+
+    # Specific exploration actions.
+    ("explore the island", "island_explore"),
+    ("explore island", "island_explore"),
+    ("search the island", "island_explore"),
+    ("search island", "island_explore"),
+
+    # Navigation / voyage actions.
+    ("where can we sail", "destinations"),
+    ("where can i sail", "destinations"),
+    ("where we can sail", "destinations"),
+    ("where i can sail", "destinations"),
+    ("where can we go", "destinations"),
+    ("where can i go", "destinations"),
+    ("where we can go", "destinations"),
+    ("where i can go", "destinations"),
+    ("places we can sail", "destinations"),
+    ("places i can sail", "destinations"),
+    ("places can we sail", "destinations"),
+    ("places can i sail", "destinations"),
+    ("voyage routes", "destinations"),
+    ("start a voyage", "voyage"),
+    ("start voyage", "voyage"),
+    ("set sail", "voyage"),
+
+    # Explicit tactical actions.
+    ("boarding", "board"),
+    ("board", "board"),
+    ("defend", "defend"),
+    ("flee", "flee"),
+    ("escape", "flee"),
+    ("attack", "attack"),
+
+    # Doubloon earning intent.
+    ("earn some doubloons", "earn_doubloons"),
+    ("earn more doubloons", "earn_doubloons"),
+    ("earn doubloons", "earn_doubloons"),
+    ("make some doubloons", "earn_doubloons"),
+    ("make more doubloons", "earn_doubloons"),
+    ("make doubloons", "earn_doubloons"),
+    ("get some doubloons", "earn_doubloons"),
+    ("get more doubloons", "earn_doubloons"),
+    ("get doubloons", "earn_doubloons"),
+    ("earn some money", "earn_doubloons"),
+    ("earn more money", "earn_doubloons"),
+    ("earn money", "earn_doubloons"),
+    ("make some money", "earn_doubloons"),
+    ("make more money", "earn_doubloons"),
+    ("make money", "earn_doubloons"),
+    ("get some money", "earn_doubloons"),
+    ("get more money", "earn_doubloons"),
+    ("get money", "earn_doubloons"),
+
+    # Ship / economy actions.
+    ("donate", "donate"),
+    ("contribute", "donate"),
+    ("repair", "repair"),
+    ("fix", "repair"),
+
+    # Broad fallback action.
+    ("fight", "attack"),
+)
+
+
+def resolve_explicit_help_intent(normalized):
+    """
+    Resolve the highest-priority explicit gameplay action.
+
+    Priority wins first. Phrase length is the tie-breaker.
+    """
+
+    matches = [
+        (phrase, key)
+        for phrase, key in HELP_ACTION_INTENTS
+        if phrase in normalized
+    ]
+
+    matches.sort(
+        key=lambda row: (
+            help_intent_priority(row[1]),
+            len(row[0]),
+        ),
+        reverse=True,
+    )
+
+    for phrase, key in matches:
+        entry = COMMAND_HELP.get(key)
+
+        if entry is not None:
+            return {
+                "key": key,
+                "command": entry["command"],
+                "description": entry["description"],
+            }
+
+    return None
+
+
 def normalize_help_text(text):
     text = str(text or "").lower()
 
@@ -611,77 +724,12 @@ def find_contextual_command_help(text, recent_messages):
         # broad fallback matching.
         # -----------------------------------------------------
 
-        contextual_intents = (
-            ("emergency repairs", "emergency_repairs"),
-            ("emergency repair", "emergency_repairs"),
-            ("brace for impact", "brace"),
-            ("full broadside", "broadside"),
-            ("rally the crew", "rally"),
-
-            ("explore the island", "island_explore"),
-            ("explore island", "island_explore"),
-            ("search the island", "island_explore"),
-            ("search island", "island_explore"),
-
-            ("where can we sail", "destinations"),
-            ("where can i sail", "destinations"),
-            ("where we can sail", "destinations"),
-            ("where i can sail", "destinations"),
-            ("where can we go", "destinations"),
-            ("where can i go", "destinations"),
-            ("where we can go", "destinations"),
-            ("where i can go", "destinations"),
-            ("places we can sail", "destinations"),
-            ("places i can sail", "destinations"),
-            ("places can we sail", "destinations"),
-            ("places can i sail", "destinations"),
-            ("voyage routes", "destinations"),
-
-            ("start a voyage", "voyage"),
-            ("start voyage", "voyage"),
-            ("set sail", "voyage"),
-
-            ("boarding", "board"),
-            ("board", "board"),
-            ("defend", "defend"),
-            ("flee", "flee"),
-            ("escape", "flee"),
-            ("attack", "attack"),
-
-            ("donate", "donate"),
-            ("contribute", "donate"),
-
-            ("repair", "repair"),
-            ("fix", "repair"),
-
-            ("fight", "attack"),
+        explicit_intent = resolve_explicit_help_intent(
+            normalized
         )
 
-        matching_intents = [
-            (phrase, key)
-            for phrase, key in contextual_intents
-            if phrase in normalized
-        ]
-
-        matching_intents.sort(
-            key=lambda row: (
-                help_intent_priority(row[1]),
-                len(row[0]),
-            ),
-            reverse=True,
-        )
-
-        if matching_intents:
-
-            key = matching_intents[0][1]
-            entry = COMMAND_HELP.get(key)
-
-            if entry:
-                return {
-                    "key": key,
-                    "command": entry["command"],
-                    "description": entry["description"],
-                }
+        if explicit_intent:
+            return explicit_intent
 
         # -----------------------------------------------------
         # Generic topic fallback
@@ -762,83 +810,12 @@ def find_natural_command_help(text):
     # "enemy ship" or "battle".
     # -----------------------------------------------------
 
-    action_intents = (
-        # Specific combat abilities first.
-        ("emergency repairs", "emergency_repairs"),
-        ("emergency repair", "emergency_repairs"),
-        ("brace for impact", "brace"),
-        ("full broadside", "broadside"),
-        ("rally the crew", "rally"),
-
-        # Specific exploration actions.
-        ("explore the island", "island_explore"),
-        ("explore island", "island_explore"),
-        ("search the island", "island_explore"),
-        ("search island", "island_explore"),
-
-        # Explicit tactical actions before broad combat nouns.
-        ("boarding", "board"),
-        ("board", "board"),
-        ("defend", "defend"),
-        ("flee", "flee"),
-        ("escape", "flee"),
-        ("attack", "attack"),
-
-        # Economy / ship actions.
-        ("earn some doubloons", "earn_doubloons"),
-        ("earn more doubloons", "earn_doubloons"),
-        ("earn doubloons", "earn_doubloons"),
-        ("make some doubloons", "earn_doubloons"),
-        ("make more doubloons", "earn_doubloons"),
-        ("make doubloons", "earn_doubloons"),
-        ("get some doubloons", "earn_doubloons"),
-        ("get more doubloons", "earn_doubloons"),
-        ("get doubloons", "earn_doubloons"),
-        ("earn some money", "earn_doubloons"),
-        ("earn more money", "earn_doubloons"),
-        ("earn money", "earn_doubloons"),
-        ("make some money", "earn_doubloons"),
-        ("make more money", "earn_doubloons"),
-        ("make money", "earn_doubloons"),
-        ("get some money", "earn_doubloons"),
-        ("get more money", "earn_doubloons"),
-        ("get money", "earn_doubloons"),
-
-        ("donate", "donate"),
-        ("contribute", "donate"),
-        ("repair", "repair"),
-        ("fix", "repair"),
-
-        # Broad fallback wording comes last.
-        ("fight", "attack"),
+    explicit_intent = resolve_explicit_help_intent(
+        normalized
     )
 
-    # Longest matching phrase wins. This prevents broad words
-    # such as "repair" or "fight" from overriding more precise
-    # intents like "emergency repairs" or "defend".
-    matching_intents = [
-        (phrase, key)
-        for phrase, key in action_intents
-        if phrase in normalized
-    ]
-
-    matching_intents.sort(
-        key=lambda row: (
-            help_intent_priority(row[1]),
-            len(row[0]),
-        ),
-        reverse=True,
-    )
-
-    for phrase, key in matching_intents:
-            entry = COMMAND_HELP.get(key)
-
-            if entry is not None:
-                return {
-                    "key": key,
-                    "command": entry["command"],
-                    "description": entry["description"],
-                }
+    if explicit_intent:
+        return explicit_intent
 
     # More specific phrases win when no explicit action intent
     # was found.

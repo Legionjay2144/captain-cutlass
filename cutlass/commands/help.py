@@ -6,7 +6,8 @@ async def handle_help_command(
     command,
     *,
     get_parrot,
-    get_ship
+    get_ship,
+    is_admin
 ):
     """
     Handle Captain Cutlass help commands.
@@ -31,39 +32,50 @@ async def handle_help_command(
             message.guild.id
         )
 
-        embed = discord.Embed(
-            title="🏴‍☠️ Captain Cutlass Help",
-            description=(
-                "Welcome aboard. Choose a category below "
-                "to see the commands ye need.\n\n"
+        help_lines = [
+            "Welcome aboard. Choose a category below "
+            "to see the commands ye need.",
 
-                "**Crew & Profiles** — "
-                "`!cutlass help crew`\n"
+            "**Crew & Profiles** — "
+            "`!cutlass help crew`",
 
-                "**Fun, Lore & History** — "
-                "`!cutlass help fun`\n"
+            "**Fun, Lore & History** — "
+            "`!cutlass help fun`",
 
-                f"**{parrot['name']}** — "
-                "`!cutlass help parrot`\n"
+            f"**{parrot['name']}** — "
+            "`!cutlass help parrot`",
 
-                f"**{ship['name']}** — "
-                "`!cutlass help ship`\n"
+            f"**{ship['name']}** — "
+            "`!cutlass help ship`",
 
-                "**Pirate World & Combat** — "
-                "`!cutlass help world`\n"
+            "**Pirate World & Combat** — "
+            "`!cutlass help world`",
+        ]
 
+        if is_admin(message):
+            help_lines.append(
                 "**Admiralty Controls** — "
-                "`!cutlass help admin`\n\n"
+                "`!cutlass help admin`"
+            )
 
+        help_lines.extend(
+            [
+                "",
                 "**Shortcut:** `!c` can replace "
-                "`!cutlass` on any command.\n"
+                "`!cutlass` on any command.",
 
                 "Example: `!c ship`, `!c explore`, "
-                "`!c attack`\n\n"
+                "`!c attack`",
 
+                "",
                 "Use `!cutlass help all` for the "
-                "full command list."
-            ),
+                "full command list.",
+            ]
+        )
+
+        embed = discord.Embed(
+            title="🏴‍☠️ Captain Cutlass Help",
+            description="\n".join(help_lines),
             color=0x3498DB
         )
 
@@ -184,16 +196,17 @@ async def handle_help_command(
             inline=False
         )
 
-        embed.add_field(
-            name="Admiralty",
-            value=(
-                "`!cutlass parrot mood <mood>`\n"
-                "`!cutlass parrot randommood`\n"
-                "`!cutlass parrot chance <percent>`\n"
-                "`!cutlass parrot on/off`"
-            ),
-            inline=False
-        )
+        if is_admin(message):
+            embed.add_field(
+                name="Admiralty",
+                value=(
+                    "`!cutlass parrot mood <mood>`\n"
+                    "`!cutlass parrot randommood`\n"
+                    "`!cutlass parrot chance <percent>`\n"
+                    "`!cutlass parrot on/off`"
+                ),
+                inline=False
+            )
 
         await message.reply(
             embed=embed,
@@ -402,6 +415,13 @@ async def handle_help_command(
     # =====================================================
 
     if command == "!cutlass help admin":
+
+        if not is_admin(message):
+            await message.reply(
+                "Only the Admiralty may view those controls.",
+                mention_author=False
+            )
+            return True
 
         embed = discord.Embed(
             title="⚙️ Admiralty Controls",
