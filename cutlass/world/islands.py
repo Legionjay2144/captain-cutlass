@@ -471,9 +471,30 @@ def normalize_island_name(name):
     )
 
 
+def resolve_island_key(name):
+    """
+    Resolve display names and legacy aliases to the canonical
+    ISLAND_CONTENT key.
+    """
+
+    key = normalize_island_name(
+        name
+    )
+
+    aliases = {
+        "sirens_reef": "siren_reef",
+        "the_frozen_wreckyard": "frozen_wreckyard",
+    }
+
+    return aliases.get(
+        key,
+        key
+    )
+
+
 def get_island_content(name):
     return ISLAND_CONTENT.get(
-        normalize_island_name(name)
+        resolve_island_key(name)
     )
 
 
@@ -502,12 +523,150 @@ def format_island(name):
     return "\n".join(lines)
 
 
-def choose_island_activity(name):
-    island = get_island_content(name)
+def island_activity_key(
+    island_name,
+    activity
+):
+    """
+    Return a deterministic key for an island activity.
+    """
+
+    island_key = resolve_island_key(
+        island_name
+    )
+
+    title_key = normalize_island_name(
+        activity.get(
+            "title",
+            "activity"
+        )
+    )
+
+    return (
+        island_key
+        + ":"
+        + title_key
+    )
+
+
+def island_activity_repeatable(
+    activity
+):
+    """
+    Treasure, supplies, and ordinary monster activity remain
+    repeatable parts of island exploration.
+
+    Lore and boss discoveries are persistent one-time content.
+    """
+
+    return activity.get(
+        "type"
+    ) in {
+        "treasure",
+        "supplies",
+        "monster",
+    }
+
+
+def get_island_activities(name):
+    island = get_island_content(
+        name
+    )
+
+    if island is None:
+        return []
+
+    activities = []
+
+    for source in island["activities"]:
+
+        activity = dict(source)
+
+        activity["activity_key"] = (
+            island_activity_key(
+                island["name"],
+                activity
+            )
+        )
+
+        activity["repeatable"] = (
+            island_activity_repeatable(
+                activity
+            )
+        )
+
+        activities.append(
+            activity
+        )
+
+    return activities
+
+
+def choose_island_activity(
+    name,
+    completed_keys=None,
+    valid_boss_keys=None,
+    valid_monster_keys=None
+):
+    island = get_island_content(
+        name
+    )
 
     if island is None:
         return None
 
+    completed = set(
+        completed_keys or ()
+    )
+
+    activities = get_island_activities(
+        island["name"]
+    )
+
+    valid_bosses = (
+        None
+        if valid_boss_keys is None
+        else set(valid_boss_keys)
+    )
+
+    valid_monsters = (
+        None
+        if valid_monster_keys is None
+        else set(valid_monster_keys)
+    )
+
+    available = []
+
+    for activity in activities:
+
+        if (
+            not activity["repeatable"]
+            and activity["activity_key"]
+            in completed
+        ):
+            continue
+
+        if (
+            activity.get("type") == "boss"
+            and valid_bosses is not None
+            and activity.get("boss")
+            not in valid_bosses
+        ):
+            continue
+
+        if (
+            activity.get("type") == "monster"
+            and valid_monsters is not None
+            and activity.get("monster")
+            not in valid_monsters
+        ):
+            continue
+
+        available.append(activity)
+
+    if not available:
+        return None
+
     return random.choice(
-        island["activities"]
+        available
     )

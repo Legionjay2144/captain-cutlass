@@ -15,6 +15,7 @@ async def handle_island_command(
     get_active_monster,
     format_island,
     choose_island_activity,
+    resolve_island_key,
     add_ship_treasury,
     add_ship_supplies,
     add_ship_history,
@@ -23,6 +24,10 @@ async def handle_island_command(
     get_active_boss,
     get_island_activity_state,
     record_island_visit,
+    get_completed_island_activities,
+    complete_island_activity,
+    valid_boss_keys,
+    valid_monster_keys,
     post_captains_log
 ):
 
@@ -171,6 +176,10 @@ async def handle_island_command(
                 .replace(" ", "_")
             )
 
+            location_key = resolve_island_key(
+                location
+            )
+
             state = await get_island_activity_state(
                 message.guild.id,
                 location_key
@@ -233,17 +242,6 @@ async def handle_island_command(
                 except (TypeError, ValueError):
                     pass
 
-            activity = choose_island_activity(
-                location
-            )
-
-            if activity is None:
-                await message.reply(
-                    "There is nothing here to explore.",
-                    mention_author=False
-                )
-                return True
-
             visit_claim = await record_island_visit(
                 message.guild.id,
                 location_key,
@@ -286,6 +284,32 @@ async def handle_island_command(
             visit_number = int(
                 visit_claim["visits"]
             )
+
+            completed_rows = (
+                await get_completed_island_activities(
+                    message.guild.id,
+                    location_key
+                )
+            )
+
+            completed_keys = {
+                row["activity_key"]
+                for row in completed_rows
+            }
+
+            activity = choose_island_activity(
+                location,
+                completed_keys=completed_keys,
+                valid_boss_keys=valid_boss_keys,
+                valid_monster_keys=valid_monster_keys
+            )
+
+            if activity is None:
+                await message.reply(
+                    "There is nothing here to explore.",
+                    mention_author=False
+                )
+                return True
 
             text = (
                 "**"
@@ -493,40 +517,81 @@ async def handle_island_command(
                             "Use `!cutlass boss`."
                         )
 
-                        await add_ship_history(
-                            message.guild.id,
-                            (
-                                "The crew discovered "
-                                + boss["name"]
-                                + " at "
-                                + location
-                                + "."
-                            ),
-                            "boss_discovery"
+                        completion_won, _ = (
+                            await complete_island_activity(
+                                message.guild.id,
+                                location_key,
+                                activity["activity_key"],
+                                activity["type"],
+                                activity["title"],
+                                message.author.id,
+                                message.author.display_name
+                            )
                         )
+
+                        if completion_won:
+                            await add_ship_history(
+                                message.guild.id,
+                                (
+                                    "The crew discovered "
+                                    + boss["name"]
+                                    + " at "
+                                    + location
+                                    + "."
+                                ),
+                                "boss_discovery"
+                            )
+
+                            text += (
+                                "\n\n**ISLAND DISCOVERY COMPLETE**\n"
+                                "This boss discovery is now recorded "
+                                "for the crew."
+                            )
 
             elif kind == "lore":
 
-                if rare_revisit:
-                    text += (
-                        "\n\n**HIDDEN DETAIL UNCOVERED**\n"
-                        "Familiarity with the island reveals something "
-                        "the crew missed on earlier expeditions."
+                completion_won, _ = (
+                    await complete_island_activity(
+                        message.guild.id,
+                        location_key,
+                        activity["activity_key"],
+                        activity["type"],
+                        activity["title"],
+                        message.author.id,
+                        message.author.display_name
+                    )
+                )
+
+                if completion_won:
+
+                    if rare_revisit:
+                        text += (
+                            "\n\n**HIDDEN DETAIL UNCOVERED**\n"
+                            "Familiarity with the island reveals something "
+                            "the crew missed on earlier expeditions."
+                        )
+
+                    await add_ship_history(
+                        message.guild.id,
+                        (
+                            activity["title"]
+                            + ": "
+                            + activity["description"]
+                        ),
+                        "island_lore"
                     )
 
-                await add_ship_history(
-                    message.guild.id,
-                    (
-                        activity["title"]
-                        + ": "
-                        + activity["description"]
-                    ),
-                    "island_lore"
-                )
+                    text += (
+                        "\n\n**ISLAND DISCOVERY COMPLETE**\n"
+                        "The discovery has been added to "
+                        "the ship's history."
+                    )
 
-                text += (
-                    "\n\nThe discovery has been added to the ship's history."
-                )
+                else:
+                    text += (
+                        "\n\nThis discovery was already "
+                        "recorded for the crew."
+                    )
 
             await message.reply(
                 text[:1900],

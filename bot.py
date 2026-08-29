@@ -24,6 +24,7 @@ from cutlass.commands.islands import handle_island_command
 from cutlass.world.islands import (
     format_island,
     choose_island_activity,
+    resolve_island_key,
 )
 from cutlass.commands.battle import handle_battle_command
 from cutlass.commands.monsters import handle_monster_command
@@ -41,6 +42,7 @@ from cutlass.commands.tickle import (
     is_natural_tickle_message,
 )
 from cutlass.world.bosses import (
+    BOSSES,
     initialize_bosses,
     get_active_boss,
     force_withdraw_boss,
@@ -50,6 +52,7 @@ from cutlass.world.bosses import (
     defend_boss,
 )
 from cutlass.world.monsters import (
+    MONSTERS,
     initialize_monsters,
     start_monster_encounter,
     format_monster,
@@ -80,6 +83,8 @@ from cutlass.world.pirate_world import (
     explore_random_island,
     get_island_activity_state,
     record_island_visit,
+    get_completed_island_activities,
+    complete_island_activity,
 )
 
 from discord.ext import tasks
@@ -6253,6 +6258,7 @@ async def handle_commands(
         get_active_monster=get_active_monster,
         format_island=format_island,
         choose_island_activity=choose_island_activity,
+        resolve_island_key=resolve_island_key,
         add_ship_treasury=add_ship_treasury,
         add_ship_supplies=add_ship_supplies,
         add_ship_history=add_ship_history,
@@ -6261,6 +6267,10 @@ async def handle_commands(
         get_active_boss=get_active_boss,
         get_island_activity_state=get_island_activity_state,
         record_island_visit=record_island_visit,
+        get_completed_island_activities=get_completed_island_activities,
+        complete_island_activity=complete_island_activity,
+        valid_boss_keys=set(BOSSES),
+        valid_monster_keys=set(MONSTERS),
         post_captains_log=post_captains_log
     ):
         return True

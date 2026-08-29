@@ -844,6 +844,29 @@ async def initialize_pirate_world():
             PRIMARY KEY (guild_id, location_key)
         );
 
+        CREATE TABLE IF NOT EXISTS island_activity_completions (
+            guild_id INTEGER NOT NULL,
+            location_key TEXT NOT NULL,
+            activity_key TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            activity_title TEXT NOT NULL,
+            completed_by INTEGER DEFAULT 0,
+            completed_by_name TEXT DEFAULT '',
+            completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (
+                guild_id,
+                location_key,
+                activity_key
+            )
+        );
+
+        CREATE INDEX IF NOT EXISTS
+        idx_island_activity_completions_guild
+        ON island_activity_completions(
+            guild_id,
+            completed_at DESC
+        );
+
         CREATE TABLE IF NOT EXISTS world_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
@@ -1601,6 +1624,152 @@ async def explore_random_island(
             else None
         ),
     }
+
+
+# ---------------------------------------------------------
+# Island activity completion
+# ---------------------------------------------------------
+
+async def get_completed_island_activities(
+    guild_id,
+    location_key=None
+):
+    db = await _db()
+
+    try:
+
+        if location_key:
+
+            cursor = await db.execute(
+                """
+                SELECT
+                    location_key,
+                    activity_key,
+                    activity_type,
+                    activity_title,
+                    completed_by,
+                    completed_by_name,
+                    completed_at
+                FROM island_activity_completions
+                WHERE guild_id = ?
+                  AND location_key = ?
+                ORDER BY completed_at,
+                         activity_key
+                """,
+                (
+                    guild_id,
+                    location_key,
+                )
+            )
+
+        else:
+
+            cursor = await db.execute(
+                """
+                SELECT
+                    location_key,
+                    activity_key,
+                    activity_type,
+                    activity_title,
+                    completed_by,
+                    completed_by_name,
+                    completed_at
+                FROM island_activity_completions
+                WHERE guild_id = ?
+                ORDER BY completed_at,
+                         location_key,
+                         activity_key
+                """,
+                (
+                    guild_id,
+                )
+            )
+
+        return await cursor.fetchall()
+
+    finally:
+        await db.close()
+
+
+async def complete_island_activity(
+    guild_id,
+    location_key,
+    activity_key,
+    activity_type,
+    activity_title,
+    user_id,
+    username
+):
+    """
+    Atomically record one persistent island activity.
+
+    Returns:
+        (True, row) for the single successful claimant.
+        (False, row) when already completed.
+    """
+
+    db = await _db()
+
+    try:
+
+        cursor = await db.execute(
+            """
+            INSERT OR IGNORE INTO
+            island_activity_completions (
+                guild_id,
+                location_key,
+                activity_key,
+                activity_type,
+                activity_title,
+                completed_by,
+                completed_by_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                location_key,
+                activity_key,
+                activity_type,
+                activity_title,
+                user_id,
+                username,
+            )
+        )
+
+        await db.commit()
+
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    location_key,
+                    activity_key,
+                    activity_type,
+                    activity_title,
+                    completed_by,
+                    completed_by_name,
+                    completed_at
+                FROM island_activity_completions
+                WHERE guild_id = ?
+                  AND location_key = ?
+                  AND activity_key = ?
+                """,
+                (
+                    guild_id,
+                    location_key,
+                    activity_key,
+                )
+            )
+        ).fetchone()
+
+        return (
+            cursor.rowcount == 1,
+            row
+        )
+
+    finally:
+        await db.close()
 
 
 # ---------------------------------------------------------
