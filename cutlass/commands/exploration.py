@@ -176,7 +176,10 @@ async def handle_exploration_command(
 
             created, battle = await start_naval_battle(
                 message.guild.id,
-                ship=ship
+                ship=ship,
+                region_profile=result.get(
+                    "encounter_profile"
+                )
             )
 
             if created:
@@ -198,21 +201,16 @@ async def handle_exploration_command(
 
         elif encounter_type == "monster":
 
-            # Mostly Kraken, occasionally Leviathan.
-            monster_key = (
-                "leviathan"
-                if random.randint(1, 100) <= 20
-                else "kraken"
-            )
-
             ship = await get_ship(
                 message.guild.id
             )
 
             created, monster = await start_monster_encounter(
                 message.guild.id,
-                monster_key,
-                ship=ship
+                ship=ship,
+                region_profile=result.get(
+                    "encounter_profile"
+                )
             )
 
             if created:

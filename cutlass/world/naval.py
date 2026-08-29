@@ -226,7 +226,199 @@ ENEMY_SHIPS = [
         "xp": 1150,
         "danger": "Legendary",
     },
+    # =====================================================
+    # REGIONAL EXPANSION
+    # =====================================================
+
+    {
+        "name": "The Harbor Rat",
+        "captain": "Tommy Dockrat",
+        "hull": 72,
+        "attack_min": 7,
+        "attack_max": 16,
+        "reward_min": 90,
+        "reward_max": 200,
+        "xp": 95,
+        "danger": "Low",
+    },
+
+    {
+        "name": "The Tidemarket Fox",
+        "captain": "Captain Nell Fairwind",
+        "hull": 92,
+        "attack_min": 9,
+        "attack_max": 20,
+        "reward_min": 125,
+        "reward_max": 270,
+        "xp": 125,
+        "danger": "Low",
+    },
+
+    {
+        "name": "The Fogbound Hound",
+        "captain": "Harlan Mist",
+        "hull": 135,
+        "attack_min": 12,
+        "attack_max": 26,
+        "reward_min": 235,
+        "reward_max": 465,
+        "xp": 235,
+        "danger": "Medium",
+    },
+
+    {
+        "name": "The Gallows Lantern",
+        "captain": "Warden Silas Rook",
+        "hull": 155,
+        "attack_min": 14,
+        "attack_max": 29,
+        "reward_min": 285,
+        "reward_max": 545,
+        "xp": 275,
+        "danger": "Medium",
+    },
+
+    {
+        "name": "The Emerald Harrier",
+        "captain": "Captain Mara Voss",
+        "hull": 205,
+        "attack_min": 18,
+        "attack_max": 36,
+        "reward_min": 510,
+        "reward_max": 920,
+        "xp": 465,
+        "danger": "High",
+    },
+
+    {
+        "name": "The Storm Crow",
+        "captain": "Rafe Thunderhand",
+        "hull": 235,
+        "attack_min": 21,
+        "attack_max": 40,
+        "reward_min": 610,
+        "reward_max": 1060,
+        "xp": 550,
+        "danger": "High",
+    },
+
+    {
+        "name": "The Ashen Vulture",
+        "captain": "Captain Cinder Vale",
+        "hull": 315,
+        "attack_min": 26,
+        "attack_max": 48,
+        "reward_min": 900,
+        "reward_max": 1500,
+        "xp": 760,
+        "danger": "Extreme",
+    },
+
+    {
+        "name": "The Hellwake",
+        "captain": "Commodore Malrec Vane",
+        "hull": 355,
+        "attack_min": 28,
+        "attack_max": 52,
+        "reward_min": 1050,
+        "reward_max": 1725,
+        "xp": 875,
+        "danger": "Extreme",
+    },
+
+    {
+        "name": "The White Lantern",
+        "captain": "Captain Isolde Frost",
+        "hull": 230,
+        "attack_min": 20,
+        "attack_max": 39,
+        "reward_min": 600,
+        "reward_max": 1040,
+        "xp": 525,
+        "danger": "High",
+    },
+
+    {
+        "name": "The Icebound Tyrant",
+        "captain": "Commodore Eirik Coldbrand",
+        "hull": 345,
+        "attack_min": 27,
+        "attack_max": 51,
+        "reward_min": 1025,
+        "reward_max": 1700,
+        "xp": 860,
+        "danger": "Extreme",
+    },
+
 ]
+
+
+NAVAL_REGION_AFFINITIES = {
+    # Shattered Coast
+    "The Rusted Fang": ("coastal",),
+    "The Crooked Minnow": ("coastal",),
+    "The Salty Turnip": ("coastal",),
+    "The Coin Snatcher": ("coastal", "blackwater"),
+    "The Leaky Lantern": ("coastal", "blackwater"),
+    "The Harbor Rat": ("coastal",),
+    "The Tidemarket Fox": ("coastal", "blackwater"),
+
+    # Blackwater Reach
+    "The Crimson Widow": ("blackwater",),
+    "The Black Kettle": ("blackwater",),
+    "The Hangman's Smile": ("blackwater", "tempest"),
+    "The Powder Monkey": ("blackwater", "tempest"),
+    "The Fogbound Hound": ("blackwater",),
+    "The Gallows Lantern": ("blackwater",),
+
+    # Emerald Tempest
+    "The Drowned Crown": ("tempest", "devils_expanse"),
+    "The Widowmaker": ("tempest", "devils_expanse"),
+    "The King's Regret": ("tempest", "frostgrave"),
+    "The Emerald Harrier": ("tempest",),
+    "The Storm Crow": ("tempest",),
+
+    # Devil's Expanse
+    "The Devil's Due": ("devils_expanse",),
+    "The Iron Gallows": ("devils_expanse", "frostgrave"),
+    "The Ashen Vulture": ("devils_expanse",),
+    "The Hellwake": ("devils_expanse",),
+
+    # Frostgrave Sea
+    "The Pale Reaper": ("devils_expanse", "frostgrave"),
+    "The White Lantern": ("frostgrave",),
+    "The Icebound Tyrant": ("frostgrave",),
+}
+
+
+def choose_naval_enemy(region_profile=None):
+    """
+    Choose an enemy ship appropriate to the scouting region.
+
+    Calls without a region preserve the legacy global roster.
+    """
+
+    if not region_profile:
+        return random.choice(
+            ENEMY_SHIPS
+        )
+
+    candidates = [
+        enemy
+        for enemy in ENEMY_SHIPS
+        if region_profile
+        in NAVAL_REGION_AFFINITIES.get(
+            enemy["name"],
+            ()
+        )
+    ]
+
+    if not candidates:
+        candidates = ENEMY_SHIPS
+
+    return random.choice(
+        candidates
+    )
 
 
 async def _db():
@@ -338,7 +530,8 @@ async def add_battle_event(
 
 async def start_naval_battle(
     guild_id,
-    ship=None
+    ship=None,
+    region_profile=None
 ):
     async with get_guild_lock(guild_id):
 
@@ -349,8 +542,8 @@ async def start_naval_battle(
         if active:
             return False, active
 
-        enemy = random.choice(
-            ENEMY_SHIPS
+        enemy = choose_naval_enemy(
+            region_profile
         )
 
         scaled = scale_encounter_stats(

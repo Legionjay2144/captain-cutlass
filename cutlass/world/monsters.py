@@ -54,7 +54,131 @@ MONSTERS = {
         "xp": 1000,
         "danger": "Legendary",
     },
+    "reef_stalker": {
+        "name": "The Reef Stalker",
+        "type": "monster",
+        "hp": 180,
+        "attack_min": 10,
+        "attack_max": 22,
+        "reward_min": 250,
+        "reward_max": 450,
+        "xp": 220,
+        "danger": "Medium",
+    },
+
+    "siren_swarm": {
+        "name": "The Siren Swarm",
+        "type": "monster",
+        "hp": 280,
+        "attack_min": 14,
+        "attack_max": 32,
+        "reward_min": 450,
+        "reward_max": 780,
+        "xp": 400,
+        "danger": "High",
+    },
+
+    "storm_serpent": {
+        "name": "The Storm Serpent",
+        "type": "monster",
+        "hp": 300,
+        "attack_min": 16,
+        "attack_max": 34,
+        "reward_min": 500,
+        "reward_max": 850,
+        "xp": 450,
+        "danger": "High",
+    },
+
+    "abyssal_maw": {
+        "name": "The Abyssal Maw",
+        "type": "monster",
+        "hp": 480,
+        "attack_min": 24,
+        "attack_max": 44,
+        "reward_min": 850,
+        "reward_max": 1350,
+        "xp": 700,
+        "danger": "Extreme",
+    },
+
+    "frost_maw": {
+        "name": "The Frost Maw",
+        "type": "monster",
+        "hp": 450,
+        "attack_min": 22,
+        "attack_max": 42,
+        "reward_min": 800,
+        "reward_max": 1300,
+        "xp": 680,
+        "danger": "Extreme",
+    },
+
 }
+
+
+MONSTER_REGION_AFFINITIES = {
+    "reef_stalker": (
+        "coastal",
+        "blackwater",
+    ),
+    "siren_swarm": (
+        "blackwater",
+        "tempest",
+    ),
+    "storm_serpent": (
+        "tempest",
+    ),
+    "kraken": (
+        "blackwater",
+        "tempest",
+        "devils_expanse",
+    ),
+    "leviathan": (
+        "tempest",
+        "devils_expanse",
+        "frostgrave",
+    ),
+    "abyssal_maw": (
+        "devils_expanse",
+    ),
+    "frost_maw": (
+        "frostgrave",
+    ),
+}
+
+
+def choose_monster_key(region_profile=None):
+    """
+    Choose a random sea monster.
+
+    Boss-typed registry entries remain available to explicit
+    callers but are excluded from random sea-monster rolls.
+    """
+
+    monster_keys = [
+        key
+        for key, monster in MONSTERS.items()
+        if monster.get("type") == "monster"
+    ]
+
+    if region_profile:
+        regional_keys = [
+            key
+            for key in monster_keys
+            if region_profile
+            in MONSTER_REGION_AFFINITIES.get(
+                key,
+                ()
+            )
+        ]
+
+        if regional_keys:
+            monster_keys = regional_keys
+
+    return random.choice(
+        monster_keys
+    )
 
 
 async def _db():
@@ -182,7 +306,8 @@ async def add_monster_event(
 async def start_monster_encounter(
     guild_id,
     monster_key=None,
-    ship=None
+    ship=None,
+    region_profile=None
 ):
     async with get_guild_lock(guild_id):
 
@@ -194,8 +319,8 @@ async def start_monster_encounter(
             return False, active
 
         if monster_key is None:
-            monster_key = random.choice(
-                list(MONSTERS.keys())
+            monster_key = choose_monster_key(
+                region_profile
             )
 
         if monster_key not in MONSTERS:
