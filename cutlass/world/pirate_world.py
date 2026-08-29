@@ -18,6 +18,8 @@ REGIONS = {
     "shattered_coast": {
         "name": "The Shattered Coast",
         "danger": "Low",
+        "theme": "Smugglers, coves, trade lanes, and broken islands.",
+        "encounter_profile": "coastal",
         "description": (
             "Broken islands, smugglers, forgotten coves, "
             "and relatively forgiving waters."
@@ -27,51 +29,65 @@ REGIONS = {
     "blackwater_reach": {
         "name": "Blackwater Reach",
         "danger": "Medium",
+        "theme": "Pirate hunters, ruins, reefs, and abandoned forts.",
+        "encounter_profile": "blackwater",
         "description": (
             "Dark currents, pirate hunting grounds, "
             "abandoned forts, and dangerous reefs."
         ),
     },
 
+    "emerald_tempest": {
+        "name": "The Emerald Tempest",
+        "danger": "High",
+        "theme": "Jungle islands, violent squalls, ruins, and strange wildlife.",
+        "encounter_profile": "tempest",
+        "description": (
+            "A storm-wracked tropical frontier where jungle-covered "
+            "islands rise from brilliant green water and ancient ruins "
+            "vanish beneath the vines."
+        ),
+    },
+
     "devils_expanse": {
         "name": "The Devil's Expanse",
         "danger": "Extreme",
+        "theme": "Volcanoes, monsters, wrecks, and cursed waters.",
+        "encounter_profile": "devils_expanse",
         "description": (
             "Violent seas where monsters, ghost stories, "
             "and legendary pirate crews are said to roam."
+        ),
+    },
+
+    "frostgrave_sea": {
+        "name": "The Frostgrave Sea",
+        "danger": "Extreme",
+        "theme": "Icebergs, frozen wrecks, blizzards, and lost expeditions.",
+        "encounter_profile": "frostgrave",
+        "description": (
+            "A bitter northern sea of moving ice, sudden whiteouts, "
+            "frozen wrecks, and expeditions that never returned."
         ),
     },
 }
 
 
 ISLANDS = {
+    # ---------------------------------------------------------
+    # The Shattered Coast
+    # ---------------------------------------------------------
+
     "blacktooth_cove": {
         "name": "Blacktooth Cove",
         "region": "shattered_coast",
         "danger": "Low",
+        "terrain": "harbor",
+        "hidden": False,
+        "discovery_weight": 100,
         "description": (
             "A crooked little harbor filled with smugglers, "
             "taverns, and suspicious merchants."
-        ),
-    },
-
-    "skullfin_island": {
-        "name": "Skullfin Island",
-        "region": "blackwater_reach",
-        "danger": "Medium",
-        "description": (
-            "A jungle-covered island dotted with ruins, "
-            "caves, and the bones of unfortunate explorers."
-        ),
-    },
-
-    "devils_maw": {
-        "name": "Devil's Maw",
-        "region": "devils_expanse",
-        "danger": "Extreme",
-        "description": (
-            "A volcanic island surrounded by brutal waters "
-            "and tales of creatures large enough to swallow ships."
         ),
     },
 
@@ -79,9 +95,55 @@ ISLANDS = {
         "name": "Whispering Key",
         "region": "shattered_coast",
         "danger": "Low",
+        "terrain": "tropical",
+        "hidden": False,
+        "discovery_weight": 90,
         "description": (
             "A quiet island where strange stone markers "
             "point toward something buried beneath the palms."
+        ),
+    },
+
+    "gullwatch_cay": {
+        "name": "Gullwatch Cay",
+        "region": "shattered_coast",
+        "danger": "Low",
+        "terrain": "coastal",
+        "hidden": False,
+        "discovery_weight": 100,
+        "description": (
+            "A wind-beaten cay overlooking busy trade waters, "
+            "popular with fishermen, smugglers, and spies."
+        ),
+    },
+
+    "smugglers_hollow": {
+        "name": "Smuggler's Hollow",
+        "region": "shattered_coast",
+        "danger": "Medium",
+        "terrain": "caverns",
+        "hidden": True,
+        "discovery_weight": 18,
+        "description": (
+            "A concealed inlet hidden behind sea caves and jagged stone, "
+            "almost invisible unless approached on the right tide."
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # Blackwater Reach
+    # ---------------------------------------------------------
+
+    "skullfin_island": {
+        "name": "Skullfin Island",
+        "region": "blackwater_reach",
+        "danger": "Medium",
+        "terrain": "jungle_ruins",
+        "hidden": False,
+        "discovery_weight": 90,
+        "description": (
+            "A jungle-covered island dotted with ruins, "
+            "caves, and the bones of unfortunate explorers."
         ),
     },
 
@@ -89,9 +151,85 @@ ISLANDS = {
         "name": "Deadman's Rest",
         "region": "blackwater_reach",
         "danger": "High",
+        "terrain": "abandoned_settlement",
+        "hidden": False,
+        "discovery_weight": 75,
         "description": (
             "An abandoned pirate settlement where lanterns "
             "are sometimes seen despite nobody living there."
+        ),
+    },
+
+    "gallows_key": {
+        "name": "Gallows Key",
+        "region": "blackwater_reach",
+        "danger": "High",
+        "terrain": "fortress_ruins",
+        "hidden": False,
+        "discovery_weight": 75,
+        "description": (
+            "A rocky island crowned by the ruins of an old naval prison "
+            "and the remains of a weather-blackened gallows."
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # The Emerald Tempest
+    # ---------------------------------------------------------
+
+    "verdant_fang": {
+        "name": "Verdant Fang",
+        "region": "emerald_tempest",
+        "danger": "High",
+        "terrain": "dense_jungle",
+        "hidden": False,
+        "discovery_weight": 70,
+        "description": (
+            "A steep jungle island shaped like a fang, covered in "
+            "waterfalls, ancient terraces, and aggressive wildlife."
+        ),
+    },
+
+    "stormglass_isle": {
+        "name": "Stormglass Isle",
+        "region": "emerald_tempest",
+        "danger": "High",
+        "terrain": "storm_coast",
+        "hidden": False,
+        "discovery_weight": 65,
+        "description": (
+            "Lightning repeatedly strikes the island's black beaches, "
+            "leaving strange green glass scattered along the shore."
+        ),
+    },
+
+    "moonpool_sanctuary": {
+        "name": "Moonpool Sanctuary",
+        "region": "emerald_tempest",
+        "danger": "Medium",
+        "terrain": "hidden_lagoon",
+        "hidden": True,
+        "discovery_weight": 12,
+        "description": (
+            "A sheltered lagoon enclosed by jungle cliffs, reachable "
+            "only through a narrow flooded passage at low tide."
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # The Devil's Expanse
+    # ---------------------------------------------------------
+
+    "devils_maw": {
+        "name": "Devil's Maw",
+        "region": "devils_expanse",
+        "danger": "Extreme",
+        "terrain": "volcanic",
+        "hidden": False,
+        "discovery_weight": 55,
+        "description": (
+            "A volcanic island surrounded by brutal waters "
+            "and tales of creatures large enough to swallow ships."
         ),
     },
 
@@ -99,9 +237,42 @@ ISLANDS = {
         "name": "Siren's Reef",
         "region": "devils_expanse",
         "danger": "Extreme",
+        "terrain": "reef_wreckage",
+        "hidden": False,
+        "discovery_weight": 50,
         "description": (
             "Jagged coral, shipwrecks, and enough sailor tales "
             "to make even Captain Cutlass check the horizon twice."
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # The Frostgrave Sea
+    # ---------------------------------------------------------
+
+    "whitebone_isle": {
+        "name": "Whitebone Isle",
+        "region": "frostgrave_sea",
+        "danger": "Extreme",
+        "terrain": "frozen_tundra",
+        "hidden": False,
+        "discovery_weight": 45,
+        "description": (
+            "A frozen island of pale cliffs and wind-carved ice where "
+            "the bones of enormous sea creatures litter the coast."
+        ),
+    },
+
+    "frozen_wreckyard": {
+        "name": "The Frozen Wreckyard",
+        "region": "frostgrave_sea",
+        "danger": "Extreme",
+        "terrain": "icebound_wrecks",
+        "hidden": True,
+        "discovery_weight": 8,
+        "description": (
+            "A maze of ancient ships trapped deep within shifting pack ice, "
+            "visible only when the frozen sea opens a temporary passage."
         ),
     },
 }
@@ -136,6 +307,9 @@ async def initialize_pirate_world():
             name TEXT NOT NULL,
             location_type TEXT DEFAULT 'island',
             danger TEXT DEFAULT 'Low',
+            terrain TEXT DEFAULT '',
+            hidden INTEGER DEFAULT 0,
+            discovery_weight INTEGER DEFAULT 100,
             description TEXT DEFAULT ''
         );
 
@@ -173,6 +347,39 @@ async def initialize_pirate_world():
         ON world_discoveries(guild_id, discovered_at DESC);
         """)
 
+        # -------------------------------------------------
+        # Priority 4 geography metadata migrations
+        # -------------------------------------------------
+
+        location_columns = await (
+            await db.execute(
+                "PRAGMA table_info(world_locations)"
+            )
+        ).fetchall()
+
+        location_column_names = {
+            row["name"]
+            for row in location_columns
+        }
+
+        if "terrain" not in location_column_names:
+            await db.execute("""
+                ALTER TABLE world_locations
+                ADD COLUMN terrain TEXT DEFAULT ''
+            """)
+
+        if "hidden" not in location_column_names:
+            await db.execute("""
+                ALTER TABLE world_locations
+                ADD COLUMN hidden INTEGER DEFAULT 0
+            """)
+
+        if "discovery_weight" not in location_column_names:
+            await db.execute("""
+                ALTER TABLE world_locations
+                ADD COLUMN discovery_weight INTEGER DEFAULT 100
+            """)
+
         for key, region in REGIONS.items():
 
             await db.execute("""
@@ -204,20 +411,37 @@ async def initialize_pirate_world():
                     name,
                     location_type,
                     danger,
+                    terrain,
+                    hidden,
+                    discovery_weight,
                     description
                 )
-                VALUES (?, ?, ?, 'island', ?, ?)
+                VALUES (?, ?, ?, 'island', ?, ?, ?, ?, ?)
                 ON CONFLICT(location_key)
                 DO UPDATE SET
                     region_key = excluded.region_key,
                     name = excluded.name,
                     danger = excluded.danger,
+                    terrain = excluded.terrain,
+                    hidden = excluded.hidden,
+                    discovery_weight = excluded.discovery_weight,
                     description = excluded.description
             """, (
                 key,
                 island["region"],
                 island["name"],
                 island["danger"],
+                island.get("terrain", ""),
+                1 if island.get("hidden") else 0,
+                max(
+                    1,
+                    int(
+                        island.get(
+                            "discovery_weight",
+                            100
+                        )
+                    )
+                ),
                 island["description"],
             ))
 
@@ -450,9 +674,22 @@ async def explore_random_island(
 
     if discover_new:
 
-        location_key = random.choice(
-            undiscovered
-        )
+        location_key = random.choices(
+            undiscovered,
+            weights=[
+                max(
+                    1,
+                    int(
+                        ISLANDS[key].get(
+                            "discovery_weight",
+                            100
+                        )
+                    )
+                )
+                for key in undiscovered
+            ],
+            k=1
+        )[0]
 
         is_new, _ = await discover_location(
             guild_id,
@@ -540,6 +777,8 @@ async def explore_random_island(
         "name": island["name"],
         "region": region["name"],
         "danger": island["danger"],
+        "terrain": island.get("terrain", ""),
+        "hidden": bool(island.get("hidden", False)),
         "description": island["description"],
         "encounter_type": encounter_type,
         "encounter": encounter,
@@ -729,22 +968,41 @@ async def format_world(
         guild_id
     )
 
+    discovered_keys = {
+        row["location_key"]
+        for row in discoveries
+    }
+
+    visible_island_keys = {
+        island_key
+        for island_key, island in ISLANDS.items()
+        if (
+            not island.get("hidden", False)
+            or island_key in discovered_keys
+        )
+    }
+
+    visible_discoveries = {
+        island_key
+        for island_key in discovered_keys
+        if island_key in visible_island_keys
+    }
+
     return (
-        "**PIRATE WORLD**\n"
+        "**PIRATE WORLD**\\n"
         "Known Regions: **"
         + str(len(REGIONS))
-        + "**\n"
+        + "**\\n"
         "Known Islands: **"
-        + str(len(ISLANDS))
-        + "**\n"
+        + str(len(visible_island_keys))
+        + "**\\n"
         "Crew Discoveries: **"
-        + str(len(discoveries))
+        + str(len(visible_discoveries))
         + "/"
-        + str(len(ISLANDS))
-        + "**\n\n"
+        + str(len(visible_island_keys))
+        + "**\\n\\n"
         "Use `!cutlass world map` to view the seas."
     )
-
 
 async def format_world_map(
     guild_id
@@ -766,7 +1024,7 @@ async def format_world_map(
     for region_key, region in REGIONS.items():
 
         lines.append(
-            "\n**"
+            "\\n**"
             + region["name"]
             + "**"
             + " — "
@@ -778,9 +1036,22 @@ async def format_world_map(
             if island["region"] != region_key:
                 continue
 
+            is_discovered = (
+                island_key in discovered_keys
+            )
+
+            is_hidden = bool(
+                island.get("hidden", False)
+            )
+
+            # Hidden locations do not occupy a visible map
+            # slot until the crew actually discovers them.
+            if is_hidden and not is_discovered:
+                continue
+
             marker = (
                 "✓"
-                if island_key in discovered_keys
+                if is_discovered
                 else "?"
             )
 
@@ -789,13 +1060,12 @@ async def format_world_map(
                 + " "
                 + (
                     island["name"]
-                    if island_key in discovered_keys
+                    if is_discovered
                     else "Undiscovered Island"
                 )
             )
 
-    return "\n".join(lines)[:1900]
-
+    return "\\n".join(lines)[:1900]
 
 async def format_discoveries(
     guild_id
