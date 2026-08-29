@@ -18,6 +18,7 @@ async def handle_exploration_command(
     start_monster_encounter,
     add_ship_treasury,
     add_ship_supplies,
+    apply_exploration_outcome,
     add_ship_history,
     post_captains_log
 ):
@@ -222,6 +223,174 @@ async def handle_exploration_command(
                     + "**\n"
                     "Use `!cutlass monster`."
                 )
+
+        # ---------------------------------------------------------
+        # Environmental hazard
+        # ---------------------------------------------------------
+
+        elif encounter_type == "hazard":
+
+            hazard = result.get("hazard") or {}
+
+            def roll_effect(name):
+                value = hazard.get(name, 0)
+
+                if isinstance(value, (tuple, list)):
+                    low, high = value
+                    return random.randint(
+                        int(low),
+                        int(high)
+                    )
+
+                return int(value or 0)
+
+            outcome = await apply_exploration_outcome(
+                message.guild.id,
+                hull_damage=roll_effect(
+                    "hull_damage"
+                ),
+                sails_damage=roll_effect(
+                    "sails_damage"
+                ),
+                supplies_change=roll_effect(
+                    "supplies_change"
+                ),
+                morale_change=roll_effect(
+                    "morale_change"
+                ),
+            )
+
+            applied = outcome["applied"]
+
+            effect_lines = []
+
+            if applied["hull_damage"]:
+                effect_lines.append(
+                    "Hull **-"
+                    + str(
+                        applied["hull_damage"]
+                    )
+                    + "**"
+                )
+
+            if applied["sails_damage"]:
+                effect_lines.append(
+                    "Sails **-"
+                    + str(
+                        applied["sails_damage"]
+                    )
+                    + "**"
+                )
+
+            if applied["supplies_change"]:
+                sign = (
+                    "+"
+                    if applied[
+                        "supplies_change"
+                    ] > 0
+                    else ""
+                )
+
+                effect_lines.append(
+                    "Supplies **"
+                    + sign
+                    + str(
+                        applied[
+                            "supplies_change"
+                        ]
+                    )
+                    + "**"
+                )
+
+            if applied["morale_change"]:
+                sign = (
+                    "+"
+                    if applied[
+                        "morale_change"
+                    ] > 0
+                    else ""
+                )
+
+                effect_lines.append(
+                    "Morale **"
+                    + sign
+                    + str(
+                        applied[
+                            "morale_change"
+                        ]
+                    )
+                    + "**"
+                )
+
+            text += (
+                "\n\n**ENVIRONMENTAL HAZARD — "
+                + str(
+                    hazard.get(
+                        "name",
+                        "Dangerous Waters"
+                    )
+                )
+                + "**"
+            )
+
+            if effect_lines:
+                text += (
+                    "\n"
+                    + "\n".join(
+                        effect_lines
+                    )
+                )
+
+            text += (
+                "\nHull: **"
+                + str(
+                    outcome["new"]["hull"]
+                )
+                + "** | Sails: **"
+                + str(
+                    outcome["new"]["sails"]
+                )
+                + "** | Supplies: **"
+                + str(
+                    outcome["new"]["supplies"]
+                )
+                + "** | Morale: **"
+                + str(
+                    outcome["new"]["morale"]
+                )
+                + "**"
+            )
+
+            history_effects = (
+                ", ".join(
+                    line.replace(
+                        "**",
+                        ""
+                    )
+                    for line in effect_lines
+                )
+                if effect_lines
+                else "no lasting damage"
+            )
+
+            await add_ship_history(
+                message.guild.id,
+                (
+                    "Exploration near "
+                    + result["name"]
+                    + " encountered "
+                    + str(
+                        hazard.get(
+                            "name",
+                            "dangerous waters"
+                        )
+                    )
+                    + ": "
+                    + history_effects
+                    + "."
+                ),
+                "exploration_hazard"
+            )
 
         # ---------------------------------------------------------
         # Treasure

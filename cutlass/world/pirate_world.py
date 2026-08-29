@@ -153,27 +153,212 @@ REGION_ENCOUNTER_PROFILES = {
     "coastal": {
         "naval": 8,
         "monster": 2,
-        "quiet": 90,
+        "hazard": 3,
+        "supplies": 12,
+        "treasure": 5,
+        "quiet": 70,
     },
     "blackwater": {
         "naval": 12,
         "monster": 6,
-        "quiet": 82,
+        "hazard": 10,
+        "supplies": 7,
+        "treasure": 5,
+        "quiet": 60,
     },
     "tempest": {
         "naval": 8,
         "monster": 10,
-        "quiet": 82,
+        "hazard": 15,
+        "supplies": 6,
+        "treasure": 5,
+        "quiet": 56,
     },
     "devils_expanse": {
         "naval": 14,
         "monster": 12,
-        "quiet": 74,
+        "hazard": 20,
+        "supplies": 4,
+        "treasure": 6,
+        "quiet": 44,
     },
     "frostgrave": {
         "naval": 10,
         "monster": 10,
-        "quiet": 80,
+        "hazard": 18,
+        "supplies": 7,
+        "treasure": 5,
+        "quiet": 50,
+    },
+}
+
+
+REGION_HAZARDS = {
+    "coastal": (
+        {
+            "name": "Hidden Reef",
+            "text": (
+                "A hidden reef scraped along the hull before "
+                "the crew could reach deeper water."
+            ),
+            "hull_damage": (2, 6),
+        },
+        {
+            "name": "Sudden Squall",
+            "text": (
+                "A sudden coastal squall caught the ship under "
+                "too much canvas and strained the rigging."
+            ),
+            "sails_damage": (2, 5),
+        },
+    ),
+    "blackwater": (
+        {
+            "name": "Blackwater Shoal",
+            "text": (
+                "The ship struck a submerged shoal hidden beneath "
+                "the dark water and thick mist."
+            ),
+            "hull_damage": (5, 11),
+        },
+        {
+            "name": "Lost in the Fog",
+            "text": (
+                "Hours were lost navigating the choking fog, "
+                "burning provisions and exhausting the crew."
+            ),
+            "supplies_change": (-8, -3),
+            "morale_change": (-5, -2),
+        },
+    ),
+    "tempest": (
+        {
+            "name": "Violent Squall",
+            "text": (
+                "A violent squall tore through the rigging as the "
+                "crew fought to keep the ship beneath her masts."
+            ),
+            "sails_damage": (7, 15),
+            "morale_change": (-5, -2),
+        },
+        {
+            "name": "Lightning Storm",
+            "text": (
+                "Lightning and mountainous seas battered the ship "
+                "while the crew struggled through the storm front."
+            ),
+            "hull_damage": (3, 8),
+            "sails_damage": (4, 10),
+        },
+    ),
+    "devils_expanse": (
+        {
+            "name": "Volcanic Shoals",
+            "text": (
+                "The ship scraped across jagged volcanic stone "
+                "hidden beneath the ash-darkened sea."
+            ),
+            "hull_damage": (9, 18),
+        },
+        {
+            "name": "Boiling Current",
+            "text": (
+                "A superheated current forced the ship onto a long "
+                "detour while heat spoiled part of the provisions."
+            ),
+            "supplies_change": (-12, -5),
+            "morale_change": (-7, -3),
+        },
+        {
+            "name": "Ash Storm",
+            "text": (
+                "Hot ash and violent wind swept across the deck, "
+                "damaging canvas and wearing down the crew."
+            ),
+            "sails_damage": (7, 14),
+            "morale_change": (-6, -2),
+        },
+    ),
+    "frostgrave": (
+        {
+            "name": "Drifting Ice",
+            "text": (
+                "A mass of drifting ice struck the ship before "
+                "the helm could turn clear."
+            ),
+            "hull_damage": (8, 16),
+        },
+        {
+            "name": "Frozen Rigging",
+            "text": (
+                "Ice accumulated across the rigging until lines "
+                "and canvas began to tear under the weight."
+            ),
+            "sails_damage": (7, 14),
+        },
+        {
+            "name": "Bitter Whiteout",
+            "text": (
+                "A prolonged whiteout trapped the crew in freezing "
+                "waters and consumed precious stores."
+            ),
+            "supplies_change": (-10, -4),
+            "morale_change": (-8, -3),
+        },
+    ),
+}
+
+
+REGION_RESOURCE_TEXT = {
+    "coastal": {
+        "supplies": (
+            "The crew recovered usable stores from abandoned "
+            "cargo drifting near the trade lanes."
+        ),
+        "treasure": (
+            "A waterlogged strongbox was recovered from wreckage "
+            "caught between the coastal shoals."
+        ),
+    },
+    "blackwater": {
+        "supplies": (
+            "Sealed provision barrels were found drifting through "
+            "the mist among the remains of an old wreck."
+        ),
+        "treasure": (
+            "The crew hauled a locked naval pay chest from wreckage "
+            "half-hidden beneath the black water."
+        ),
+    },
+    "tempest": {
+        "supplies": (
+            "Storm-tossed expedition crates were recovered before "
+            "the next squall swept across the sea."
+        ),
+        "treasure": (
+            "Fresh wreckage revealed a sealed strongbox thrown "
+            "overboard by the violent storms."
+        ),
+    },
+    "devils_expanse": {
+        "supplies": (
+            "The crew salvaged heat-scarred but usable stores from "
+            "a wreck drifting beyond the volcanic shoals."
+        ),
+        "treasure": (
+            "A scorched treasure chest was pulled from wreckage "
+            "circling the volcanic current."
+        ),
+    },
+    "frostgrave": {
+        "supplies": (
+            "Frozen expedition stores were recovered from wreckage "
+            "preserved between the ice floes."
+        ),
+        "treasure": (
+            "The crew freed an old strongbox from a frozen wreck "
+            "before the ice closed around it again."
+        ),
     },
 }
 
@@ -850,12 +1035,20 @@ async def explore_random_island(
         )
     )
 
+    encounter_types = (
+        "naval",
+        "monster",
+        "hazard",
+        "supplies",
+        "treasure",
+        "quiet",
+    )
+
     encounter_type = random.choices(
-        ("naval", "monster", "quiet"),
-        weights=(
-            encounter_weights["naval"],
-            encounter_weights["monster"],
-            encounter_weights["quiet"],
+        encounter_types,
+        weights=tuple(
+            encounter_weights[kind]
+            for kind in encounter_types
         ),
         k=1
     )[0]
@@ -874,6 +1067,31 @@ async def explore_random_island(
     elif encounter_type == "monster":
 
         encounter = encounter_text["monster"]
+
+    elif encounter_type == "hazard":
+
+        hazard = random.choice(
+            REGION_HAZARDS.get(
+                encounter_profile,
+                REGION_HAZARDS["coastal"]
+            )
+        )
+
+        encounter = hazard["text"]
+
+    elif encounter_type in (
+        "supplies",
+        "treasure",
+    ):
+
+        resource_text = REGION_RESOURCE_TEXT.get(
+            encounter_profile,
+            REGION_RESOURCE_TEXT["coastal"]
+        )
+
+        encounter = resource_text[
+            encounter_type
+        ]
 
     else:
 
@@ -900,6 +1118,11 @@ async def explore_random_island(
         "description": island["description"],
         "encounter_type": encounter_type,
         "encounter": encounter,
+        "hazard": (
+            hazard
+            if encounter_type == "hazard"
+            else None
+        ),
     }
 
 

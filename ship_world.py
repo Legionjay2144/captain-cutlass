@@ -3502,6 +3502,275 @@ async def combat_ship_status(guild_id):
     }
 
 
+async def apply_exploration_outcome(
+    guild_id,
+    *,
+    hull_damage=0,
+    sails_damage=0,
+    supplies_change=0,
+    morale_change=0,
+    treasury_gain=0
+):
+    """
+    Atomically apply a deterministic exploration outcome to
+    the Living Ship.
+
+    Positive hull_damage and sails_damage values represent
+    damage. supplies_change and morale_change may be positive
+    or negative. treasury_gain may only increase treasury.
+
+    The entire ship-state mutation is serialized through the
+    shared per-guild Ship World lock.
+    """
+
+    async with get_guild_lock(guild_id):
+
+        await ensure_ship(guild_id)
+
+        # Apply any passive recovery before calculating the
+        # environmental outcome against current ship state.
+        await _apply_passive_recovery_unlocked(
+            guild_id
+        )
+
+        upgrades = await get_upgrade_levels(
+            guild_id
+        )
+
+        caps = ship_caps(upgrades)
+
+        max_supplies = int(
+            caps["supplies"]
+        )
+
+        hull_damage = max(
+            0,
+            int(hull_damage)
+        )
+
+        sails_damage = max(
+            0,
+            int(sails_damage)
+        )
+
+        supplies_change = int(
+            supplies_change
+        )
+
+        morale_change = int(
+            morale_change
+        )
+
+        treasury_gain = max(
+            0,
+            int(treasury_gain)
+        )
+
+        db = await _db()
+
+        try:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT
+                        hull,
+                        sails,
+                        supplies,
+                        morale,
+                        treasury
+                    FROM ships
+                    WHERE guild_id = ?
+                    """,
+                    (guild_id,)
+                )
+            ).fetchone()
+
+            if row is None:
+                raise RuntimeError(
+                    "Living Ship state is unavailable."
+                )
+
+            old_hull = int(
+                row["hull"]
+            )
+
+            old_sails = int(
+                row["sails"]
+            )
+
+            old_supplies = int(
+                row["supplies"]
+            )
+
+            old_morale = int(
+                row["morale"]
+            )
+
+            old_treasury = int(
+                row["treasury"]
+            )
+
+            new_hull = max(
+                0,
+                old_hull - hull_damage
+            )
+
+            new_sails = max(
+                0,
+                old_sails - sails_damage
+            )
+
+            new_supplies = max(
+                0,
+                min(
+                    max_supplies,
+                    old_supplies
+                    + supplies_change
+                )
+            )
+
+            new_morale = max(
+                0,
+                min(
+                    100,
+                    old_morale
+                    + morale_change
+                )
+            )
+
+            new_treasury = (
+                old_treasury
+                + treasury_gain
+            )
+
+            actual_hull_damage = (
+                old_hull - new_hull
+            )
+
+            actual_sails_damage = (
+                old_sails - new_sails
+            )
+
+            actual_supplies_change = (
+                new_supplies
+                - old_supplies
+            )
+
+            actual_morale_change = (
+                new_morale
+                - old_morale
+            )
+
+            actual_treasury_gain = (
+                new_treasury
+                - old_treasury
+            )
+
+            became_disabled = (
+                old_hull > 0
+                and new_hull <= 0
+            )
+
+            if became_disabled:
+
+                now_text = _ts()
+
+                recovery_started_at = (
+                    now_text
+                )
+
+                recovery_last_at = (
+                    now_text
+                )
+
+            else:
+
+                recovery_started_at = None
+                recovery_last_at = None
+
+            await db.execute(
+                """
+                UPDATE ships
+                SET hull = ?,
+                    sails = ?,
+                    supplies = ?,
+                    morale = ?,
+                    treasury = ?,
+                    recovery_started_at = CASE
+                        WHEN ? THEN ?
+                        ELSE recovery_started_at
+                    END,
+                    recovery_last_at = CASE
+                        WHEN ? THEN ?
+                        ELSE recovery_last_at
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                """,
+                (
+                    new_hull,
+                    new_sails,
+                    new_supplies,
+                    new_morale,
+                    new_treasury,
+                    became_disabled,
+                    recovery_started_at,
+                    became_disabled,
+                    recovery_last_at,
+                    guild_id,
+                )
+            )
+
+            await db.commit()
+
+        finally:
+            await db.close()
+
+        if became_disabled:
+
+            await add_history(
+                guild_id,
+                (
+                    "The Living Ship was **DISABLED** "
+                    "during exploration at **0 hull**. "
+                    "Emergency passive repairs have begun."
+                ),
+                "ship_disabled"
+            )
+
+        return {
+            "old": {
+                "hull": old_hull,
+                "sails": old_sails,
+                "supplies": old_supplies,
+                "morale": old_morale,
+                "treasury": old_treasury,
+            },
+            "new": {
+                "hull": new_hull,
+                "sails": new_sails,
+                "supplies": new_supplies,
+                "morale": new_morale,
+                "treasury": new_treasury,
+            },
+            "applied": {
+                "hull_damage":
+                    actual_hull_damage,
+                "sails_damage":
+                    actual_sails_damage,
+                "supplies_change":
+                    actual_supplies_change,
+                "morale_change":
+                    actual_morale_change,
+                "treasury_gain":
+                    actual_treasury_gain,
+            },
+            "became_disabled":
+                became_disabled,
+        }
+
+
 async def add_ship_treasury(
     guild_id,
     amount

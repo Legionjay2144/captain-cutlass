@@ -111,6 +111,7 @@ from ship_world import (
     damage_ship, reward_ship, _reward_ship_unlocked, combat_ship_status,
     get_ship_operational_status,
     add_ship_treasury, add_ship_supplies,
+    apply_exploration_outcome,
     add_history as add_ship_history
 )
 
@@ -6229,6 +6230,7 @@ async def handle_commands(
         start_monster_encounter=start_monster_encounter,
         add_ship_treasury=add_ship_treasury,
         add_ship_supplies=add_ship_supplies,
+        apply_exploration_outcome=apply_exploration_outcome,
         add_ship_history=add_ship_history,
         post_captains_log=post_captains_log
     ):
