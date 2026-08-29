@@ -54,6 +54,30 @@ BOSSES = {
         "danger": "Legendary",
         "phases": 3,
     },
+
+    "last_jailer": {
+        "name": "The Last Jailer",
+        "hp": 500,
+        "attack_min": 23,
+        "attack_max": 40,
+        "reward_min": 1150,
+        "reward_max": 1800,
+        "xp": 950,
+        "danger": "Extreme",
+        "phases": 2,
+    },
+
+    "admiral_coldgrave": {
+        "name": "Admiral Coldgrave",
+        "hp": 725,
+        "attack_min": 30,
+        "attack_max": 50,
+        "reward_min": 1900,
+        "reward_max": 3000,
+        "xp": 1600,
+        "danger": "Legendary",
+        "phases": 3,
+    },
 }
 
 
@@ -405,6 +429,37 @@ BOSS_PHASE_MECHANICS = {
         3: {
             "name": "Wrath of the Deep",
             "enemy_damage_mult": 1.45,
+            "defend_mult": 0.60,
+        },
+    },
+
+    "last_jailer": {
+        1: {
+            "name": "Keeper of the Gallows",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        },
+        2: {
+            "name": "Break the Chains",
+            "enemy_damage_mult": 1.30,
+            "defend_mult": 0.55,
+        },
+    },
+
+    "admiral_coldgrave": {
+        1: {
+            "name": "Frozen Command",
+            "enemy_damage_mult": 1.00,
+            "defend_mult": 0.50,
+        },
+        2: {
+            "name": "Broadside Beneath the Ice",
+            "enemy_damage_mult": 1.25,
+            "defend_mult": 0.55,
+        },
+        3: {
+            "name": "Coldgrave's Last Stand",
+            "enemy_damage_mult": 1.50,
             "defend_mult": 0.60,
         },
     },
