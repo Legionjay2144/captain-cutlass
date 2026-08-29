@@ -489,10 +489,28 @@ async def initialize_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 lore TEXT NOT NULL,
                 category TEXT DEFAULT 'general',
+                provenance TEXT DEFAULT 'self_lore',
                 importance INTEGER DEFAULT 5,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        if not await column_exists(
+            db,
+            "captain_lore",
+            "provenance"
+        ):
+            await db.execute("""
+                ALTER TABLE captain_lore
+                ADD COLUMN provenance TEXT
+            """)
+
+            await db.execute("""
+                UPDATE captain_lore
+                SET provenance = 'legacy_self_lore'
+                WHERE provenance IS NULL
+                   OR TRIM(provenance) = ''
+            """)
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS server_lore (
@@ -1215,7 +1233,8 @@ async def delete_user_memories(
 async def add_captain_lore(
     lore,
     category="personal",
-    importance=5
+    importance=5,
+    provenance="self_lore"
 ):
     # -----------------------------------------------------
     # Living Ship identity guard
@@ -1237,6 +1256,18 @@ async def add_captain_lore(
 
     if not raw_lore:
         return False
+
+    provenance = str(
+        provenance or "self_lore"
+    ).strip().lower()
+
+    allowed_provenance = {
+        "self_lore",
+        "legacy_self_lore",
+    }
+
+    if provenance not in allowed_provenance:
+        provenance = "self_lore"
 
     lore_lower = raw_lore.lower()
 
@@ -1451,12 +1482,14 @@ async def add_captain_lore(
             INSERT INTO captain_lore (
                 lore,
                 category,
+                provenance,
                 importance
             )
-            VALUES (?, ?, ?)
+            VALUES (?, ?, ?, ?)
         """, (
             lore,
             category,
+            provenance,
             importance
         ))
 
@@ -1471,7 +1504,7 @@ async def get_captain_lore(
     db = await get_db()
 
     cursor = await db.execute("""
-        SELECT lore, category, importance
+        SELECT lore, category, provenance, importance
         FROM captain_lore
         ORDER BY importance DESC, id DESC
         LIMIT ?
@@ -1485,7 +1518,8 @@ async def get_captain_lore(
         {
             "lore": row[0],
             "category": row[1],
-            "importance": row[2]
+            "provenance": row[2],
+            "importance": row[3]
         }
         for row in rows
     ]

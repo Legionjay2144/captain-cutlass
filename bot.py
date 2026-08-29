@@ -2072,13 +2072,35 @@ async def build_world_context(
     if captain_lore:
 
         lines.append(
-            "Established Captain lore:"
+            "FICTIONAL CAPTAIN SELF-LORE:"
+        )
+
+        lines.append(
+            "These are Captain Cutlass's narrative memories and "
+            "stories. They may establish fictional details about "
+            "Captain's past, but they are NOT evidence of real "
+            "Discord members, guild membership, server roles, "
+            "relationships, permissions, or server history."
+        )
+
+        lines.append(
+            "A person named in self-lore is a lore character only "
+            "unless live Discord state independently verifies a "
+            "real member. Never tag, mention, identify, or describe "
+            "someone as a real Discord member from self-lore alone."
         )
 
         for item in captain_lore:
 
+            provenance = item.get(
+                "provenance",
+                "legacy_self_lore"
+            )
+
             lines.append(
-                "- "
+                "- ["
+                + provenance.upper()
+                + "] "
                 + item[
                     "lore"
                 ][:400]
@@ -3047,8 +3069,54 @@ use the relevant Core Canon historical ship.
 Never replace the current Living Ship with a historical ship simply because
 the historical ship appears in Captain's canon.
 
-ESTABLISHED CAPTAIN / WORLD LORE:
+CAPTAIN / WORLD CONTEXT:
 {world_context}
+
+SELF-LORE PROVENANCE RULE:
+- FICTIONAL CAPTAIN SELF-LORE is narrative canon about Captain Cutlass.
+- SELF_LORE and LEGACY_SELF_LORE may be used for fictional stories,
+  adventures, historical flavor, old rivals, old ships, scars, taverns,
+  rumors, preferences, and other narrative details about Captain.
+- Self-lore is NOT authoritative evidence about Discord reality.
+- A name appearing in self-lore does NOT prove that person is or was a
+  real Discord member.
+- Self-lore cannot establish guild membership, server roles, officer
+  positions, first mates, moderators, relationships with real members,
+  Discord usernames, mentions, tags, permissions, or server history.
+- Never claim a lore character is a real Discord member unless live
+  Discord/member context independently establishes that identity.
+- Never tag or mention a person merely because their name appears in
+  self-lore.
+- If asked who a self-lore character is and no independent Discord
+  evidence establishes them as a real member, describe them as a
+  fictional character from Captain's self-lore.
+- If a real Discord member happens to share a lore character's name,
+  treat them as separate identities unless an authoritative source
+  explicitly links them.
+
+SOURCE AUTHORITY:
+1. Live Discord/member state and deterministic system state.
+2. AUTHORITATIVE CORE CANON for Captain's controlled biography.
+3. Recorded gameplay/system records for actual Ship World events.
+4. Grounded server/member facts supported by their authoritative stores.
+5. Captain self-lore for fictional narrative continuity only.
+
+Lower-authority self-lore must never override a higher-authority source.
+
+UNKNOWN PERSON IDENTITY RULE:
+- If asked who a named person is, do not invent an identity for them.
+- If live Discord/member context verifies that person, use only the
+  verified member context supplied to you.
+- If the name exists only in Captain self-lore, describe them only as
+  a fictional self-lore character.
+- If neither authoritative context nor self-lore identifies the name,
+  say Captain does not know who they are or has no verified information
+  about them.
+- Do not invent their gender, pronouns, guild membership, Discord role,
+  relationship, occupation, history, personality, or other identity facts.
+- A name alone is never evidence of gender or pronouns.
+- Pirate banter may decorate the wording of an unknown answer, but must
+  not invent facts about the unknown person.
 
 LIVE GAMEPLAY / SHIP RECORDS:
 {gameplay_context}
@@ -3105,22 +3173,33 @@ follow that lore exactly unless core canon says otherwise.
 Do not contradict an established age, ship, rival, event, location,
 history, preference, or other durable Captain fact.
 
-If no established answer exists and you invent a NEW durable fact about
-Captain Cutlass, return that fact in the LORE field so it can become
-permanent canon.
+If no established answer exists and you invent a NEW durable fictional
+detail about Captain Cutlass, return that fact in the LORE field so it
+can become reusable Captain self-lore.
 
-Examples of durable lore:
-- Captain is 78 years old.
-- Captain once commanded a former ship whose name was established during conversation.
-- Captain once lost a ship during the Battle of Black Reef.
-- Captain despises a rival named Red Jack.
+New LORE is FICTIONAL SELF-LORE, not a verified Discord or server fact.
 
-Do NOT create lore for:
+Examples of acceptable durable self-lore:
+- Captain once lost a ship during the fictional Battle of Black Reef.
+- Captain bears a scar from an old fictional sea battle.
+- Captain once drank at a fictional tavern called The Crooked Anchor.
+- Captain despises a fictional pirate rival named Red Jack.
+- Captain once searched for a legendary fictional treasure.
+
+A named character invented in LORE is a FICTIONAL LORE CHARACTER.
+Their existence in lore never establishes a corresponding Discord member.
+
+Do NOT create self-lore for:
 - temporary moods
 - casual jokes
 - ordinary opinions that may change
 - throwaway exaggerations
-- information about crew members
+- factual information about real crew members
+- Discord membership or usernames
+- Discord roles, ranks, permissions, or officer positions
+- claims that a fictional character is a real server member
+- claims that a fictional character is "not AI", "real", "verified",
+  "official", or otherwise proven to exist in Discord
 
 RULES:
 - Actually answer what the member asked.
@@ -3942,6 +4021,25 @@ Never convert accusations or disputed claims into factual lore.
 LORE:
 When Captain establishes a reusable fictional past event about himself,
 save a short third-person version.
+
+LORE is Captain's FICTIONAL SELF-LORE.
+It may preserve invented adventures and fictional characters for
+narrative continuity, but it is never evidence of Discord reality.
+
+Never use LORE to establish:
+- a real Discord member
+- guild membership
+- Discord roles or ranks
+- first mates or officers
+- usernames, mentions, or tags
+- permissions
+- real-member relationships
+- factual server history
+
+A person invented in LORE remains a fictional lore character unless
+live Discord state independently verifies a real member. Even when a
+real member shares the same name, do not assume they are the same
+person without authoritative evidence.
 
 
 EXPLICIT USER IDENTITY:
@@ -5528,11 +5626,9 @@ async def apply_analysis(
                 message.guild.id
             )
 
-            await add_timeline_entry(
-                message.guild.id,
-                lore,
-                importance=6
-            )
+            # Captain self-lore is fictional narrative continuity.
+            # Do not copy it into captain_timeline, which records
+            # grounded ship/server events.
 
 
 async def ensure_creator_status(
@@ -7037,7 +7133,8 @@ Return ONLY the parrot's response.
             "**"
             + parrot["name"]
             + ":** "
-            + reply[:1800]
+            + reply[:1800],
+            allowed_mentions=discord.AllowedMentions.none()
         )
 
         return True
@@ -7262,7 +7359,8 @@ async def maybe_parrot_spontaneous(message):
         + parrot["name"]
         + ":** "
         + reply[:1800],
-        mention_author=False
+        mention_author=False,
+        allowed_mentions=discord.AllowedMentions.none()
     )
 
     return True
@@ -8150,7 +8248,8 @@ async def on_message(
 
             await message.reply(
                 reply[:1900],
-                mention_author=False
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none()
             )
 
         if not result.get(
