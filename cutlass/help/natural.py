@@ -259,6 +259,23 @@ COMMAND_HELP = {
             "world status",
         ),
     },
+    "world_findings": {
+        "command": "!c world findings",
+        "description": (
+            "view unique findings uncovered "
+            "across the Pirate World"
+        ),
+        "terms": (
+            "world findings",
+            "findings",
+            "special discoveries",
+            "unique discoveries",
+            "found landmarks",
+            "found ruins",
+            "found wrecks",
+        ),
+    },
+
     "world_map": {
         "command": "!c world map",
         "description": "view the discovered Pirate World map",

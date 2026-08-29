@@ -5,6 +5,7 @@ async def handle_world_command(
     format_world,
     format_world_map,
     format_discoveries,
+    format_world_findings,
     get_world_history
 ):
 
@@ -28,6 +29,17 @@ async def handle_world_command(
 
         await message.reply(
             await format_world_map(
+                message.guild.id
+            ),
+            mention_author=False
+        )
+
+        return True
+
+    if command == "!cutlass world findings":
+
+        await message.reply(
+            await format_world_findings(
                 message.guild.id
             ),
             mention_author=False

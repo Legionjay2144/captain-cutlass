@@ -568,6 +568,209 @@ ISLANDS = {
 }
 
 
+# ---------------------------------------------------------
+# Persistent world findings
+# ---------------------------------------------------------
+#
+# These are discoveries within already charted locations.
+# They are deliberately separate from world_discoveries:
+#
+#   world_discoveries -> islands / charted geography
+#   world_findings    -> unique sites, wrecks, ruins,
+#                        landmarks, and lore discoveries
+#
+# Each finding may be discovered only once per guild.
+# ---------------------------------------------------------
+
+WORLD_FINDINGS = {
+    # -----------------------------------------------------
+    # Shattered Coast
+    # -----------------------------------------------------
+    "blacktooth_signal_tower": {
+        "location": "blacktooth_cove",
+        "type": "landmark",
+        "name": "The Old Signal Tower",
+        "rarity": "Common",
+        "importance": 4,
+        "description": (
+            "A weather-beaten signal tower overlooking the "
+            "approach to Blacktooth Cove, its fire basket "
+            "still blackened from decades of use."
+        ),
+    },
+    "whispering_stone_circle": {
+        "location": "whispering_key",
+        "type": "ruin",
+        "name": "The Whispering Stones",
+        "rarity": "Uncommon",
+        "importance": 5,
+        "description": (
+            "A ring of salt-worn standing stones hidden "
+            "among the palms, carved with symbols no living "
+            "sailor can fully translate."
+        ),
+    },
+    "gullwatch_beacon": {
+        "location": "gullwatch_cay",
+        "type": "landmark",
+        "name": "The Gullwatch Beacon",
+        "rarity": "Common",
+        "importance": 4,
+        "description": (
+            "The remains of an old navigation beacon built "
+            "to guide merchant ships safely through the "
+            "coastal shoals."
+        ),
+    },
+    "hollow_smuggler_vault": {
+        "location": "smugglers_hollow",
+        "type": "hidden_site",
+        "name": "The Sealed Smuggler Vault",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "A concealed stone chamber beyond the flooded "
+            "caverns, marked with the symbols of a vanished "
+            "smuggling brotherhood."
+        ),
+    },
+
+    # -----------------------------------------------------
+    # Blackwater Reach
+    # -----------------------------------------------------
+    "skullfin_serpent_idol": {
+        "location": "skullfin_island",
+        "type": "ruin",
+        "name": "The Serpent Idol",
+        "rarity": "Uncommon",
+        "importance": 5,
+        "description": (
+            "A moss-covered stone idol buried deep among "
+            "Skullfin's ruins, depicting a crowned serpent "
+            "rising from the sea."
+        ),
+    },
+    "deadmans_bell": {
+        "location": "deadmans_rest",
+        "type": "lore",
+        "name": "The Bell of Deadman's Rest",
+        "rarity": "Uncommon",
+        "importance": 6,
+        "description": (
+            "A cracked settlement bell whose inscription "
+            "records the final evacuation of Deadman's Rest."
+        ),
+    },
+    "gallows_prison_archive": {
+        "location": "gallows_key",
+        "type": "lore",
+        "name": "The Gallows Prison Archive",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "A water-damaged registry naming prisoners, "
+            "privateers, and condemned captains once held "
+            "inside the ruined fortress."
+        ),
+    },
+
+    # -----------------------------------------------------
+    # Emerald Tempest
+    # -----------------------------------------------------
+    "verdant_sunken_temple": {
+        "location": "verdant_fang",
+        "type": "ruin",
+        "name": "The Sunken Jungle Temple",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "A vine-covered temple complex sinking slowly "
+            "into the jungle floor beneath the roots of "
+            "enormous ancient trees."
+        ),
+    },
+    "stormglass_observatory": {
+        "location": "stormglass_isle",
+        "type": "landmark",
+        "name": "The Stormglass Observatory",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "A shattered stone observatory positioned where "
+            "lightning repeatedly strikes the island's "
+            "highest ridge."
+        ),
+    },
+    "moonpool_tide_chamber": {
+        "location": "moonpool_sanctuary",
+        "type": "hidden_site",
+        "name": "The Moonpool Tide Chamber",
+        "rarity": "Legendary",
+        "importance": 9,
+        "description": (
+            "A hidden chamber beneath the lagoon whose "
+            "carved walls track tides, moons, and forgotten "
+            "routes across the pirate seas."
+        ),
+    },
+
+    # -----------------------------------------------------
+    # Devil's Expanse
+    # -----------------------------------------------------
+    "maw_obsidian_gate": {
+        "location": "devils_maw",
+        "type": "landmark",
+        "name": "The Obsidian Gate",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "Two immense pillars of volcanic glass forming "
+            "a natural gateway above the boiling shoreline."
+        ),
+    },
+    "siren_drowned_galleon": {
+        "location": "siren_reef",
+        "type": "wreck",
+        "name": "The Drowned Galleon",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "The mostly intact remains of an unidentified "
+            "galleon resting beneath the reef among dozens "
+            "of smaller wrecks."
+        ),
+    },
+
+    # -----------------------------------------------------
+    # Frostgrave Sea
+    # -----------------------------------------------------
+    "whitebone_colossus": {
+        "location": "whitebone_isle",
+        "type": "landmark",
+        "name": "The Whitebone Colossus",
+        "rarity": "Rare",
+        "importance": 7,
+        "description": (
+            "The enormous frozen skeleton of a sea creature "
+            "far larger than any monster recorded by the "
+            "crew."
+        ),
+    },
+    "coldgrave_flagship": {
+        "location": "frozen_wreckyard",
+        "type": "wreck",
+        "name": "Coldgrave's Lost Flagship",
+        "rarity": "Legendary",
+        "importance": 9,
+        "description": (
+            "A massive warship trapped upright in ancient "
+            "ice, its frozen pennants still bearing the "
+            "mark of Admiral Coldgrave."
+        ),
+    },
+}
+
+
 async def _db():
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
@@ -612,6 +815,26 @@ async def initialize_pirate_world():
             visits INTEGER DEFAULT 1,
             PRIMARY KEY (guild_id, location_key)
         );
+
+        CREATE TABLE IF NOT EXISTS world_findings (
+            guild_id INTEGER NOT NULL,
+            finding_key TEXT NOT NULL,
+            location_key TEXT NOT NULL,
+            finding_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            rarity TEXT DEFAULT 'Common',
+            description TEXT DEFAULT '',
+            discovered_by INTEGER DEFAULT 0,
+            discovered_by_name TEXT DEFAULT '',
+            discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, finding_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_world_findings_guild
+        ON world_findings(guild_id, discovered_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_world_findings_location
+        ON world_findings(guild_id, location_key);
 
         CREATE TABLE IF NOT EXISTS island_activity_state (
             guild_id INTEGER NOT NULL,
@@ -915,6 +1138,250 @@ async def get_discovered_locations(
 
 
 # ---------------------------------------------------------
+# World findings
+# ---------------------------------------------------------
+
+async def discover_world_finding(
+    guild_id,
+    finding_key,
+    user_id,
+    username
+):
+    """
+    Atomically claim a unique world finding for a guild.
+
+    Returns:
+        (True, finding) when this call discovered it.
+        (False, finding) when already discovered.
+        (False, None) for an unknown finding.
+    """
+
+    finding = WORLD_FINDINGS.get(
+        finding_key
+    )
+
+    if not finding:
+        return False, None
+
+    location_key = finding["location"]
+
+    if location_key not in ISLANDS:
+        return False, None
+
+    db = await _db()
+
+    try:
+
+        cursor = await db.execute(
+            """
+            INSERT OR IGNORE INTO world_findings (
+                guild_id,
+                finding_key,
+                location_key,
+                finding_type,
+                name,
+                rarity,
+                description,
+                discovered_by,
+                discovered_by_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                finding_key,
+                location_key,
+                finding["type"],
+                finding["name"],
+                finding.get(
+                    "rarity",
+                    "Common"
+                ),
+                finding["description"],
+                user_id,
+                username,
+            )
+        )
+
+        await db.commit()
+
+        if cursor.rowcount != 1:
+
+            existing = await (
+                await db.execute(
+                    """
+                    SELECT
+                        finding_key,
+                        location_key,
+                        finding_type,
+                        name,
+                        rarity,
+                        description,
+                        discovered_by,
+                        discovered_by_name,
+                        discovered_at
+                    FROM world_findings
+                    WHERE guild_id = ?
+                      AND finding_key = ?
+                    """,
+                    (
+                        guild_id,
+                        finding_key,
+                    )
+                )
+            ).fetchone()
+
+            return False, existing
+
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    finding_key,
+                    location_key,
+                    finding_type,
+                    name,
+                    rarity,
+                    description,
+                    discovered_by,
+                    discovered_by_name,
+                    discovered_at
+                FROM world_findings
+                WHERE guild_id = ?
+                  AND finding_key = ?
+                """,
+                (
+                    guild_id,
+                    finding_key,
+                )
+            )
+        ).fetchone()
+
+        return True, row
+
+    finally:
+        await db.close()
+
+
+async def get_world_findings(
+    guild_id,
+    location_key=None
+):
+
+    db = await _db()
+
+    try:
+
+        if location_key:
+
+            cursor = await db.execute(
+                """
+                SELECT
+                    finding_key,
+                    location_key,
+                    finding_type,
+                    name,
+                    rarity,
+                    description,
+                    discovered_by,
+                    discovered_by_name,
+                    discovered_at
+                FROM world_findings
+                WHERE guild_id = ?
+                  AND location_key = ?
+                ORDER BY discovered_at,
+                         finding_key
+                """,
+                (
+                    guild_id,
+                    location_key,
+                )
+            )
+
+        else:
+
+            cursor = await db.execute(
+                """
+                SELECT
+                    finding_key,
+                    location_key,
+                    finding_type,
+                    name,
+                    rarity,
+                    description,
+                    discovered_by,
+                    discovered_by_name,
+                    discovered_at
+                FROM world_findings
+                WHERE guild_id = ?
+                ORDER BY discovered_at,
+                         finding_key
+                """,
+                (
+                    guild_id,
+                )
+            )
+
+        return await cursor.fetchall()
+
+    finally:
+        await db.close()
+
+
+async def format_world_findings(
+    guild_id
+):
+
+    rows = await get_world_findings(
+        guild_id
+    )
+
+    if not rows:
+        return (
+            "**WORLD FINDINGS**\n"
+            "The crew hasn't uncovered any "
+            "special world findings yet."
+        )
+
+    lines = [
+        "**WORLD FINDINGS**"
+    ]
+
+    for row in rows:
+
+        island = ISLANDS.get(
+            row["location_key"]
+        )
+
+        location_name = (
+            island["name"]
+            if island
+            else row["location_key"]
+        )
+
+        lines.append(
+            "• **"
+            + row["name"]
+            + "** ["
+            + row["rarity"]
+            + " "
+            + row["finding_type"].replace(
+                "_",
+                " "
+            ).title()
+            + "] — "
+            + location_name
+            + " • found by "
+            + (
+                row["discovered_by_name"]
+                or "Unknown"
+            )
+        )
+
+    return "\n".join(lines)[:1900]
+
+
+# ---------------------------------------------------------
 # Exploration
 # ---------------------------------------------------------
 
@@ -1116,6 +1583,16 @@ async def explore_random_island(
         "terrain": island.get("terrain", ""),
         "hidden": bool(island.get("hidden", False)),
         "description": island["description"],
+        "finding_key": next(
+            (
+                key
+                for key, finding
+                in WORLD_FINDINGS.items()
+                if finding["location"]
+                == location_key
+            ),
+            None
+        ),
         "encounter_type": encounter_type,
         "encounter": encounter,
         "hazard": (

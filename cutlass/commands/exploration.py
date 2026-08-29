@@ -20,6 +20,8 @@ async def handle_exploration_command(
     add_ship_supplies,
     apply_exploration_outcome,
     add_ship_history,
+    discover_world_finding,
+    add_world_history,
     post_captains_log
 ):
 
@@ -484,15 +486,142 @@ async def handle_exploration_command(
 
         else:
 
-            await add_ship_history(
-                message.guild.id,
-                (
-                    "The crew explored "
-                    + result["name"]
-                    + " without incident."
-                ),
-                "exploration"
-            )
+            finding_discovered = False
+
+            # -------------------------------------------------
+            # Unique world finding roll
+            #
+            # Findings may only appear during a quiet revisit
+            # to an already-charted location.
+            #
+            # New-island discovery remains its own event and
+            # cannot reveal the island's internal finding in
+            # the same command.
+            # -------------------------------------------------
+
+            if (
+                not result["new"]
+                and random.randint(1, 100) <= 30
+            ):
+
+                finding_key = result.get(
+                    "finding_key"
+                )
+
+                if finding_key:
+
+                    claimed, finding = (
+                        await discover_world_finding(
+                            message.guild.id,
+                            finding_key,
+                            message.author.id,
+                            message.author.display_name
+                        )
+                    )
+
+                    if claimed and finding:
+
+                        finding_discovered = True
+
+                        finding_name = finding[
+                            "name"
+                        ]
+
+                        finding_rarity = finding[
+                            "rarity"
+                        ]
+
+                        finding_type = (
+                            finding[
+                                "finding_type"
+                            ]
+                            .replace(
+                                "_",
+                                " "
+                            )
+                            .title()
+                        )
+
+                        text += (
+                            "\n\n"
+                            "**WORLD FINDING**\n"
+                            "**"
+                            + finding_name
+                            + "**\n"
+                            + finding[
+                                "description"
+                            ]
+                            + "\n"
+                            + finding_rarity
+                            + " "
+                            + finding_type
+                        )
+
+                        history_text = (
+                            message.author.display_name
+                            + " uncovered **"
+                            + finding_name
+                            + "** while exploring **"
+                            + result["name"]
+                            + "**."
+                        )
+
+                        await add_ship_history(
+                            message.guild.id,
+                            history_text,
+                            "world_finding"
+                        )
+
+                        if finding_rarity in (
+                            "Rare",
+                            "Legendary"
+                        ):
+
+                            importance = (
+                                9
+                                if finding_rarity
+                                == "Legendary"
+                                else 7
+                            )
+
+                            await add_world_history(
+                                message.guild.id,
+                                history_text,
+                                "finding",
+                                importance
+                            )
+
+                        if (
+                            finding_rarity
+                            == "Legendary"
+                        ):
+
+                            await post_captains_log(
+                                message.guild,
+                                (
+                                    "**LEGENDARY WORLD "
+                                    "FINDING**\n"
+                                    + message.author.display_name
+                                    + " uncovered **"
+                                    + finding_name
+                                    + "** at **"
+                                    + result["name"]
+                                    + "**."
+                                ),
+                                "world"
+                            )
+
+            if not finding_discovered:
+
+                await add_ship_history(
+                    message.guild.id,
+                    (
+                        "The crew explored "
+                        + result["name"]
+                        + " without incident."
+                    ),
+                    "exploration"
+                )
 
         await message.reply(
             text[:1900],
