@@ -283,13 +283,12 @@ ISLAND_CONTENT = {
                 "reward_max": 425,
             },
             {
-                "type": "monster",
+                "type": "lore",
                 "title": "The Fang Stirs",
                 "description": (
                     "Trees crash in the jungle as something enormous "
                     "begins stalking the expedition."
                 ),
-                "monster": "jungle_behemoth",
             },
             {
                 "type": "lore",
@@ -398,13 +397,12 @@ ISLAND_CONTENT = {
                 "amount_max": 35,
             },
             {
-                "type": "monster",
+                "type": "lore",
                 "title": "The Whitebone Hunter",
                 "description": (
                     "A massive shape moves between the ice ridges "
                     "and begins circling the landing party."
                 ),
-                "monster": "frost_maw",
             },
             {
                 "type": "lore",

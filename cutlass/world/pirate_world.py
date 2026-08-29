@@ -73,6 +73,111 @@ REGIONS = {
 }
 
 
+
+
+REGION_ENCOUNTER_TEXT = {
+    "coastal": {
+        "naval": (
+            "Lookouts spotted unfamiliar sails weaving between "
+            "the shoals and busy coastal shipping lanes."
+        ),
+        "monster": (
+            "A huge shadow rolled beneath the clear coastal water "
+            "before disappearing toward deeper seas."
+        ),
+        "quiet": (
+            "The crew charted reefs, currents, fishing grounds, "
+            "and well-traveled coastal waters."
+        ),
+    },
+    "blackwater": {
+        "naval": (
+            "Dark sails emerged through the mist, using the murky "
+            "channels of Blackwater Reach for cover."
+        ),
+        "monster": (
+            "Something massive disturbed the black water below, "
+            "leaving a widening wake through the fog."
+        ),
+        "quiet": (
+            "The crew sounded the murky channels and marked hidden "
+            "shoals beneath the black water."
+        ),
+    },
+    "tempest": {
+        "naval": (
+            "A ship appeared between towering storm fronts, its "
+            "sails flashing beneath sheets of rain and lightning."
+        ),
+        "monster": (
+            "A vast shape surfaced beneath the storm swell as "
+            "lightning illuminated the churning sea."
+        ),
+        "quiet": (
+            "The crew mapped storm currents, jungle-lined shores, "
+            "and dangerous reefs between squalls."
+        ),
+    },
+    "devils_expanse": {
+        "naval": (
+            "Hostile sails crossed the red horizon through smoke, "
+            "ash, and the glow of distant volcanic waters."
+        ),
+        "monster": (
+            "The sea heaved violently as something enormous moved "
+            "through the superheated depths below."
+        ),
+        "quiet": (
+            "The crew charted volcanic shoals, boiling currents, "
+            "and treacherous passages through Devil's Expanse."
+        ),
+    },
+    "frostgrave": {
+        "naval": (
+            "A dark vessel emerged between drifting ice and thick "
+            "fog, silently closing through the frozen sea."
+        ),
+        "monster": (
+            "The ice groaned as something immense passed beneath "
+            "the frozen surface alongside the scouting vessel."
+        ),
+        "quiet": (
+            "The crew marked ice fields, frozen wrecks, shifting "
+            "channels, and safe passages through the fog."
+        ),
+    },
+}
+
+
+REGION_ENCOUNTER_PROFILES = {
+    "coastal": {
+        "naval": 8,
+        "monster": 2,
+        "quiet": 90,
+    },
+    "blackwater": {
+        "naval": 12,
+        "monster": 6,
+        "quiet": 82,
+    },
+    "tempest": {
+        "naval": 8,
+        "monster": 10,
+        "quiet": 82,
+    },
+    "devils_expanse": {
+        "naval": 14,
+        "monster": 12,
+        "quiet": 74,
+    },
+    "frostgrave": {
+        "naval": 10,
+        "monster": 10,
+        "quiet": 80,
+    },
+}
+
+
 ISLANDS = {
     # ---------------------------------------------------------
     # The Shattered Coast
@@ -733,49 +838,62 @@ async def explore_random_island(
     # island rewards are intentionally excluded here.
     # -----------------------------------------------------
 
-    encounter_roll = random.randint(
-        1,
-        100
+    encounter_profile = region.get(
+        "encounter_profile",
+        "coastal"
     )
 
-    if encounter_roll <= 10:
-
-        encounter_type = "naval"
-
-        encounter = (
-            "Lookouts spotted unfamiliar sails "
-            "moving through the surrounding waters."
+    encounter_weights = (
+        REGION_ENCOUNTER_PROFILES.get(
+            encounter_profile,
+            REGION_ENCOUNTER_PROFILES["coastal"]
         )
+    )
 
-    elif encounter_roll <= 15:
+    encounter_type = random.choices(
+        ("naval", "monster", "quiet"),
+        weights=(
+            encounter_weights["naval"],
+            encounter_weights["monster"],
+            encounter_weights["quiet"],
+        ),
+        k=1
+    )[0]
 
-        encounter_type = "monster"
-
-        encounter = (
-            "Something enormous moved beneath "
-            "the scouting vessel."
+    encounter_text = (
+        REGION_ENCOUNTER_TEXT.get(
+            encounter_profile,
+            REGION_ENCOUNTER_TEXT["coastal"]
         )
+    )
+
+    if encounter_type == "naval":
+
+        encounter = encounter_text["naval"]
+
+    elif encounter_type == "monster":
+
+        encounter = encounter_text["monster"]
 
     else:
 
-        encounter_type = "quiet"
-
         if is_new:
             encounter = (
-                "The crew charted the island from offshore "
-                "and marked it on the ship's maps."
+                "The crew charted **"
+                + island["name"]
+                + "** from offshore and marked it "
+                "on the ship's maps. "
+                + encounter_text["quiet"]
             )
         else:
-            encounter = (
-                "The crew charted currents, reefs, and "
-                "landmarks but found nothing immediately dangerous."
-            )
+            encounter = encounter_text["quiet"]
 
     return {
         "new": is_new,
         "key": location_key,
         "name": island["name"],
         "region": region["name"],
+        "encounter_profile": encounter_profile,
         "danger": island["danger"],
         "terrain": island.get("terrain", ""),
         "hidden": bool(island.get("hidden", False)),
