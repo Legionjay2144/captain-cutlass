@@ -164,6 +164,21 @@ async def handle_exploration_command(
             "quiet"
         )
 
+        world_event = result.get(
+            "world_event"
+        )
+
+        if world_event:
+            text += (
+                "\n\n**LIVING WORLD EVENT — "
+                + world_event["name"]
+                + "**\n"
+                + world_event.get(
+                    "effect_text",
+                    ""
+                )
+            )
+
         # ---------------------------------------------------------
         # Naval encounter
         # ---------------------------------------------------------
@@ -403,6 +418,43 @@ async def handle_exploration_command(
                 250
             )
 
+            treasure_multiplier = float(
+                (
+                    world_event
+                    or {}
+                ).get(
+                    "treasure_multiplier",
+                    1.0
+                )
+            )
+
+            if treasure_multiplier != 1.0:
+                base_reward = reward
+
+                reward = max(
+                    1,
+                    int(
+                        round(
+                            reward
+                            * treasure_multiplier
+                        )
+                    )
+                )
+
+                bonus = (
+                    reward
+                    - base_reward
+                )
+
+                if bonus > 0:
+                    text += (
+                        "\n\n**WORLD EVENT BONUS**\n"
+                        "Event conditions increased the "
+                        "treasure haul by **"
+                        + str(bonus)
+                        + " doubloons**."
+                    )
+
             ship_after = await add_ship_treasury(
                 message.guild.id,
                 reward
@@ -440,6 +492,54 @@ async def handle_exploration_command(
                 10,
                 30
             )
+
+            supplies_multiplier = float(
+                (
+                    world_event
+                    or {}
+                ).get(
+                    "supplies_multiplier",
+                    1.0
+                )
+            )
+
+            if supplies_multiplier != 1.0:
+                base_found = found
+
+                found = max(
+                    1,
+                    int(
+                        round(
+                            found
+                            * supplies_multiplier
+                        )
+                    )
+                )
+
+                difference = (
+                    found
+                    - base_found
+                )
+
+                if difference > 0:
+                    text += (
+                        "\n\n**WORLD EVENT BONUS**\n"
+                        "Event conditions increased the "
+                        "recoverable supplies by **+"
+                        + str(difference)
+                        + "**."
+                    )
+
+                elif difference < 0:
+                    text += (
+                        "\n\n**WORLD EVENT CONDITIONS**\n"
+                        "Regional conditions reduced the "
+                        "recoverable supplies by **"
+                        + str(
+                            abs(difference)
+                        )
+                        + "**."
+                    )
 
             before = int(
                 ship["supplies"]

@@ -276,6 +276,23 @@ COMMAND_HELP = {
         ),
     },
 
+    "world_events": {
+        "command": "!c world events",
+        "description": (
+            "view the active Living World Event "
+            "and its regional effects"
+        ),
+        "terms": (
+            "world events",
+            "world event",
+            "active event",
+            "current event",
+            "living world event",
+            "regional event",
+            "sea conditions",
+        ),
+    },
+
     "world_map": {
         "command": "!c world map",
         "description": "view the discovered Pirate World map",

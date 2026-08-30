@@ -77,8 +77,12 @@ from cutlass.world.pirate_world import (
     format_world_map,
     format_discoveries,
     format_world_findings,
+    format_world_events,
     get_world_history,
     add_world_history,
+    get_active_world_event,
+    activate_world_event,
+    end_world_event,
     discover_world_finding,
     explore_random_island,
     get_island_activity_state,
@@ -6220,6 +6224,7 @@ async def handle_commands(
         format_world_map=format_world_map,
         format_discoveries=format_discoveries,
         format_world_findings=format_world_findings,
+        format_world_events=format_world_events,
         get_world_history=get_world_history
     ):
         return True

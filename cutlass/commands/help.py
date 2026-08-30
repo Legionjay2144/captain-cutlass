@@ -320,6 +320,7 @@ async def handle_help_command(
                 "`!c world map` — Discovered regions and islands\n"
                 "`!c world locations` — Discovered locations\n"
                 "`!c world history` — World discovery history\n"
+                "`!c world events` — Active Living World Event\n"
                 "`!c explore` — Scout surrounding waters\n\n"
 
                 "Scouting may discover new islands. "
@@ -544,6 +545,7 @@ async def handle_help_command(
                 "`!c world map`\n"
                 "`!c world locations`\n"
                 "`!c world history`\n"
+                "`!c world events`\n"
                 "`!c explore` — Scout surrounding waters\n"
                 "`!c island` — Current island\n"
                 "`!c island explore` — Explore current island"

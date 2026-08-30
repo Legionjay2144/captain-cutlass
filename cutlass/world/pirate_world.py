@@ -3,6 +3,8 @@ import random
 
 import aiosqlite
 
+from cutlass.world.locks import get_guild_lock
+
 
 DB_PATH = os.getenv(
     "DATABASE_PATH",
@@ -771,6 +773,125 @@ WORLD_FINDINGS = {
 }
 
 
+# ---------------------------------------------------------
+# Priority 4 — Living World Events
+# ---------------------------------------------------------
+
+WORLD_EVENTS = {
+    "merchant_convoy_season": {
+        "name": "Merchant Convoy Season",
+        "region_profile": "coastal",
+        "duration_hours": 6,
+        "importance": 5,
+        "description": (
+            "Merchant convoys crowd the Shattered Coast, "
+            "drawing salvagers, escorts, and opportunistic pirates."
+        ),
+        "effect_text": (
+            "Treasure and usable supplies are more common "
+            "in coastal waters."
+        ),
+        "encounter_modifiers": {
+            "supplies": 8,
+            "treasure": 7,
+            "quiet": -15,
+        },
+        "treasure_multiplier": 1.20,
+        "supplies_multiplier": 1.25,
+    },
+
+    "blackwater_pirate_surge": {
+        "name": "Blackwater Pirate Surge",
+        "region_profile": "blackwater",
+        "duration_hours": 6,
+        "importance": 6,
+        "description": (
+            "Rival pirate crews flood Blackwater Reach after "
+            "rumors spread of poorly defended naval treasure."
+        ),
+        "effect_text": (
+            "Enemy ships and valuable drifting wreckage are "
+            "more common throughout Blackwater Reach."
+        ),
+        "encounter_modifiers": {
+            "naval": 10,
+            "treasure": 5,
+            "quiet": -15,
+        },
+        "treasure_multiplier": 1.20,
+        "supplies_multiplier": 1.00,
+    },
+
+    "emerald_tempest_event": {
+        "name": "The Emerald Tempest",
+        "region_profile": "tempest",
+        "duration_hours": 5,
+        "importance": 7,
+        "description": (
+            "A violent storm system settles over the Emerald "
+            "Tempest and drives dangerous creatures toward "
+            "the surface."
+        ),
+        "effect_text": (
+            "Storm hazards and sea monsters become more common."
+        ),
+        "encounter_modifiers": {
+            "monster": 8,
+            "hazard": 12,
+            "quiet": -20,
+        },
+        "treasure_multiplier": 1.00,
+        "supplies_multiplier": 1.00,
+    },
+
+    "devils_red_tide": {
+        "name": "Devil's Red Tide",
+        "region_profile": "devils_expanse",
+        "duration_hours": 5,
+        "importance": 8,
+        "description": (
+            "The waters of Devil's Expanse turn crimson as "
+            "predators and hostile vessels converge around "
+            "the volcanic currents."
+        ),
+        "effect_text": (
+            "Naval threats and monsters become significantly "
+            "more common in Devil's Expanse."
+        ),
+        "encounter_modifiers": {
+            "naval": 7,
+            "monster": 9,
+            "hazard": 4,
+            "quiet": -20,
+        },
+        "treasure_multiplier": 1.10,
+        "supplies_multiplier": 1.00,
+    },
+
+    "frostgrave_whiteout": {
+        "name": "Frostgrave Whiteout",
+        "region_profile": "frostgrave",
+        "duration_hours": 5,
+        "importance": 7,
+        "description": (
+            "A vast whiteout swallows Frostgrave Sea, hiding "
+            "ice fields, wrecks, and safe passages alike."
+        ),
+        "effect_text": (
+            "Environmental hazards become more common while "
+            "recoverable supplies become harder to find."
+        ),
+        "encounter_modifiers": {
+            "hazard": 14,
+            "supplies": -4,
+            "quiet": -10,
+        },
+        "treasure_multiplier": 1.00,
+        "supplies_multiplier": 0.85,
+    },
+}
+
+
 async def _db():
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
@@ -865,6 +986,32 @@ async def initialize_pirate_world():
         ON island_activity_completions(
             guild_id,
             completed_at DESC
+        );
+
+        CREATE TABLE IF NOT EXISTS world_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            event_key TEXT NOT NULL,
+            region_profile TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            starts_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ends_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS
+        idx_world_events_active_guild
+        ON world_events(guild_id)
+        WHERE status = 'active';
+
+        CREATE INDEX IF NOT EXISTS
+        idx_world_events_guild
+        ON world_events(
+            guild_id,
+            id DESC
         );
 
         CREATE TABLE IF NOT EXISTS world_history (
@@ -985,6 +1132,525 @@ async def initialize_pirate_world():
 
     finally:
         await db.close()
+
+
+# ---------------------------------------------------------
+# Living World Events
+# ---------------------------------------------------------
+
+async def _expire_world_events_unlocked(
+    db,
+    guild_id
+):
+    """
+    Expire stale active events for one guild.
+
+    Returns the rows whose active -> expired transition
+    was owned by this call.
+    """
+
+    rows = await (
+        await db.execute(
+            """
+            SELECT *
+            FROM world_events
+            WHERE guild_id = ?
+              AND status = 'active'
+              AND datetime(ends_at)
+                  <= datetime('now')
+            ORDER BY id
+            """,
+            (
+                guild_id,
+            )
+        )
+    ).fetchall()
+
+    expired = []
+
+    for row in rows:
+
+        cursor = await db.execute(
+            """
+            UPDATE world_events
+            SET status = 'expired',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status = 'active'
+              AND datetime(ends_at)
+                  <= datetime('now')
+            """,
+            (
+                row["id"],
+            )
+        )
+
+        if cursor.rowcount != 1:
+            continue
+
+        expired.append(
+            row
+        )
+
+        await db.execute(
+            """
+            INSERT INTO world_history (
+                guild_id,
+                event_type,
+                content,
+                importance
+            )
+            VALUES (?, 'world_event', ?, ?)
+            """,
+            (
+                guild_id,
+                (
+                    row["name"]
+                    + " ended in "
+                    + row["region_profile"]
+                    .replace("_", " ")
+                    .title()
+                    + "."
+                ),
+                5,
+            )
+        )
+
+    return expired
+
+
+async def expire_world_events(
+    guild_id
+):
+    """
+    Deterministically expire stale events.
+
+    No scheduler is required; reads and world actions may
+    safely call this before using active event state.
+    """
+
+    async with get_guild_lock(
+        guild_id
+    ):
+
+        db = await _db()
+
+        try:
+            await db.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            expired = (
+                await _expire_world_events_unlocked(
+                    db,
+                    guild_id
+                )
+            )
+
+            await db.commit()
+
+            return [
+                dict(row)
+                for row in expired
+            ]
+
+        except Exception:
+            await db.rollback()
+            raise
+
+        finally:
+            await db.close()
+
+
+async def get_active_world_event(
+    guild_id
+):
+    """
+    Return the guild's currently active Living World Event.
+
+    Stale state is expired before the result is returned.
+    """
+
+    async with get_guild_lock(
+        guild_id
+    ):
+
+        db = await _db()
+
+        try:
+            await db.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            await _expire_world_events_unlocked(
+                db,
+                guild_id
+            )
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT *
+                    FROM world_events
+                    WHERE guild_id = ?
+                      AND status = 'active'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+            await db.commit()
+
+            return (
+                dict(row)
+                if row
+                else None
+            )
+
+        except Exception:
+            await db.rollback()
+            raise
+
+        finally:
+            await db.close()
+
+
+async def activate_world_event(
+    guild_id,
+    event_key,
+    duration_hours=None
+):
+    """
+    Atomically activate one Living World Event.
+
+    Exactly one active event may exist per guild.
+
+    Returns:
+        (True, row) when this call created the event.
+        (False, row) when another event is already active.
+        (False, None) for an unknown event key.
+    """
+
+    event = WORLD_EVENTS.get(
+        str(event_key)
+    )
+
+    if not event:
+        return False, None
+
+    duration = (
+        event["duration_hours"]
+        if duration_hours is None
+        else duration_hours
+    )
+
+    duration = max(
+        1,
+        int(duration)
+    )
+
+    async with get_guild_lock(
+        guild_id
+    ):
+
+        db = await _db()
+
+        try:
+            await db.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            await _expire_world_events_unlocked(
+                db,
+                guild_id
+            )
+
+            active = await (
+                await db.execute(
+                    """
+                    SELECT *
+                    FROM world_events
+                    WHERE guild_id = ?
+                      AND status = 'active'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+            if active:
+                await db.commit()
+
+                return (
+                    False,
+                    dict(active)
+                )
+
+            modifier = (
+                "+"
+                + str(duration)
+                + " hours"
+            )
+
+            cursor = await db.execute(
+                """
+                INSERT INTO world_events (
+                    guild_id,
+                    event_key,
+                    region_profile,
+                    name,
+                    description,
+                    ends_at
+                )
+                VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    datetime(
+                        'now',
+                        ?
+                    )
+                )
+                """,
+                (
+                    guild_id,
+                    event_key,
+                    event["region_profile"],
+                    event["name"],
+                    event["description"],
+                    modifier,
+                )
+            )
+
+            event_id = (
+                cursor.lastrowid
+            )
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT *
+                    FROM world_events
+                    WHERE id = ?
+                    """,
+                    (
+                        event_id,
+                    )
+                )
+            ).fetchone()
+
+            await db.execute(
+                """
+                INSERT INTO world_history (
+                    guild_id,
+                    event_type,
+                    content,
+                    importance
+                )
+                VALUES (?, 'world_event', ?, ?)
+                """,
+                (
+                    guild_id,
+                    (
+                        event["name"]
+                        + " began in "
+                        + event[
+                            "region_profile"
+                        ]
+                        .replace("_", " ")
+                        .title()
+                        + "."
+                    ),
+                    int(
+                        event.get(
+                            "importance",
+                            5
+                        )
+                    ),
+                )
+            )
+
+            await db.commit()
+
+            return (
+                True,
+                dict(row)
+            )
+
+        except Exception:
+            await db.rollback()
+            raise
+
+        finally:
+            await db.close()
+
+
+async def end_world_event(
+    guild_id
+):
+    """
+    Explicitly end the active world event.
+
+    Primarily useful for deterministic tests and future
+    administrative/event-resolution flows.
+    """
+
+    async with get_guild_lock(
+        guild_id
+    ):
+
+        db = await _db()
+
+        try:
+            await db.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            await _expire_world_events_unlocked(
+                db,
+                guild_id
+            )
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT *
+                    FROM world_events
+                    WHERE guild_id = ?
+                      AND status = 'active'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+            if not row:
+                await db.commit()
+
+                return False, None
+
+            cursor = await db.execute(
+                """
+                UPDATE world_events
+                SET status = 'ended',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND status = 'active'
+                """,
+                (
+                    row["id"],
+                )
+            )
+
+            changed = (
+                cursor.rowcount == 1
+            )
+
+            if changed:
+                await db.execute(
+                    """
+                    INSERT INTO world_history (
+                        guild_id,
+                        event_type,
+                        content,
+                        importance
+                    )
+                    VALUES (
+                        ?,
+                        'world_event',
+                        ?,
+                        5
+                    )
+                    """,
+                    (
+                        guild_id,
+                        (
+                            row["name"]
+                            + " ended."
+                        ),
+                    )
+                )
+
+            await db.commit()
+
+            return (
+                changed,
+                dict(row)
+            )
+
+        except Exception:
+            await db.rollback()
+            raise
+
+        finally:
+            await db.close()
+
+
+async def format_world_events(
+    guild_id
+):
+    """
+    Format the currently active Living World Event.
+    """
+
+    event = await get_active_world_event(
+        guild_id
+    )
+
+    if not event:
+        return (
+            "**LIVING WORLD EVENTS**\n"
+            "No major world event is currently active."
+        )
+
+    definition = WORLD_EVENTS.get(
+        event["event_key"],
+        {}
+    )
+
+    effect_text = definition.get(
+        "effect_text",
+        (
+            "The event is changing conditions "
+            "across the region."
+        )
+    )
+
+    region_name = (
+        event["region_profile"]
+        .replace("_", " ")
+        .title()
+    )
+
+    return (
+        "**LIVING WORLD EVENT**\n"
+        "**"
+        + event["name"]
+        + "**\n"
+        "Region: **"
+        + region_name
+        + "**\n"
+        + event["description"]
+        + "\n\n"
+        "**Current Conditions:** "
+        + effect_text
+        + "\n"
+        "Ends (UTC): **"
+        + str(event["ends_at"])
+        + "**"
+    )
 
 
 # ---------------------------------------------------------
@@ -1518,12 +2184,120 @@ async def explore_random_island(
         "coastal"
     )
 
-    encounter_weights = (
+    base_encounter_weights = (
         REGION_ENCOUNTER_PROFILES.get(
             encounter_profile,
             REGION_ENCOUNTER_PROFILES["coastal"]
         )
     )
+
+    # Always work from a copy. Living World Events must never
+    # mutate the global regional profile definitions.
+    encounter_weights = dict(
+        base_encounter_weights
+    )
+
+    active_world_event = (
+        await get_active_world_event(
+            guild_id
+        )
+    )
+
+    applied_world_event = None
+
+    if (
+        active_world_event
+        and active_world_event[
+            "region_profile"
+        ] == encounter_profile
+    ):
+        definition = WORLD_EVENTS.get(
+            active_world_event[
+                "event_key"
+            ]
+        )
+
+        if definition:
+
+            for kind, modifier in (
+                definition.get(
+                    "encounter_modifiers",
+                    {}
+                ).items()
+            ):
+                if kind not in encounter_weights:
+                    continue
+
+                encounter_weights[kind] = max(
+                    0,
+                    int(
+                        encounter_weights[kind]
+                    )
+                    + int(modifier)
+                )
+
+            # Protect random.choices from malformed future
+            # configuration while keeping the current catalog
+            # fully deterministic.
+            if sum(
+                encounter_weights.values()
+            ) <= 0:
+                encounter_weights = dict(
+                    base_encounter_weights
+                )
+            else:
+                applied_world_event = {
+                    "id": active_world_event["id"],
+                    "event_key": (
+                        active_world_event[
+                            "event_key"
+                        ]
+                    ),
+                    "name": (
+                        active_world_event[
+                            "name"
+                        ]
+                    ),
+                    "region_profile": (
+                        active_world_event[
+                            "region_profile"
+                        ]
+                    ),
+                    "description": (
+                        active_world_event[
+                            "description"
+                        ]
+                    ),
+                    "effect_text": (
+                        definition.get(
+                            "effect_text",
+                            ""
+                        )
+                    ),
+                    "encounter_modifiers": dict(
+                        definition.get(
+                            "encounter_modifiers",
+                            {}
+                        )
+                    ),
+                    "treasure_multiplier": float(
+                        definition.get(
+                            "treasure_multiplier",
+                            1.0
+                        )
+                    ),
+                    "supplies_multiplier": float(
+                        definition.get(
+                            "supplies_multiplier",
+                            1.0
+                        )
+                    ),
+                    "ends_at": (
+                        active_world_event[
+                            "ends_at"
+                        ]
+                    ),
+                }
 
     encounter_types = (
         "naval",
@@ -1602,6 +2376,10 @@ async def explore_random_island(
         "name": island["name"],
         "region": region["name"],
         "encounter_profile": encounter_profile,
+        "encounter_weights": dict(
+            encounter_weights
+        ),
+        "world_event": applied_world_event,
         "danger": island["danger"],
         "terrain": island.get("terrain", ""),
         "hidden": bool(island.get("hidden", False)),
