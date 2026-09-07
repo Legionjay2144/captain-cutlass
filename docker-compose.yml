@@ -23,5 +23,5 @@ services:
       LOCAL_AI_TEMPERATURE: ${LOCAL_AI_TEMPERATURE:-}
 
     volumes:
-      - /data/captain-cutlass/data:/app/data
+      - ./data:/app/data
       
