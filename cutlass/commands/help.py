@@ -113,6 +113,7 @@ async def handle_help_command(
             "`!cutlass jobs` — Crew job board\n"
             "`!cutlass work` — View your work ledger\n"
             "`!cutlass work <job>` — Take a crew shift\n"
+            "`!cutlass work patch the hull` — Help repair the ship during recovery\n"
             "`!cutlass stats` — Your statistics\n"
             "`!cutlass birthday` — View your birthday\n"
             "`!cutlass birthday set <month> <day>` — Set birthday\n"
@@ -267,7 +268,8 @@ async def handle_help_command(
                 "Crew donations build persistent contribution totals. "
                 "Contribution milestones can award bonus Doubloons.\n\n"
                 "Crew work stays available even when the Living Ship "
-                "is disabled."
+                "is disabled. Maintenance jobs can restore hull back to "
+                "operational status."
             ),
             inline=False
         )
@@ -292,7 +294,8 @@ async def handle_help_command(
             value=(
                 "`!c jobs` — Crew job board\n"
                 "`!c work` — Your work ledger\n"
-                "`!c work <job>` — Take a crew shift"
+                "`!c work <job>` — Take a crew shift\n"
+                "`!c work patch the hull` — Repair the Living Ship during recovery"
             ),
             inline=False
         )

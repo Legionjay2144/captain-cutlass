@@ -3356,6 +3356,50 @@ async def format_ship_status(guild_id):
             ),
         ])
 
+        try:
+            from cutlass.world.crew_work import get_repair_snapshot
+        except Exception:
+            repair_snapshot = None
+        else:
+            repair_snapshot = await get_repair_snapshot(
+                guild_id
+            )
+
+        if repair_snapshot and repair_snapshot["active"]:
+            top_contributors = repair_snapshot["contributors"][:3]
+
+            lines.extend([
+                "",
+                "**CREW MAINTENANCE**",
+                (
+                    "Crew repair progress: **+"
+                    + str(repair_snapshot["cycle_hull_restored"])
+                    + " hull this cycle**"
+                ),
+                (
+                    "Hull remaining to operational: **"
+                    + str(repair_snapshot["remaining"])
+                    + " hull**"
+                ),
+            ])
+
+            if top_contributors:
+                contributor_text = ", ".join(
+                    (
+                        str(row["username"] or "Unknown")
+                        + " (+"
+                        + str(int(row["hull_restored"]))
+                        + ")"
+                    )
+                    for row in top_contributors
+                )
+
+                lines.append(
+                    "Top contributors: **"
+                    + contributor_text
+                    + "**"
+                )
+
     lines.extend([
         "",
         f"Voyages Completed: **{ship['voyages_completed']}**",
