@@ -1,8 +1,11 @@
-CREATOR_PROFILE = """
+CREATOR_NAME = "Jay"
+
+
+CREATOR_PROFILE = f"""
 CAPTAIN CUTLASS CREATOR PROFILE
 
 NAME:
-Jay
+{CREATOR_NAME}
 
 ROLE:
 Jay is Captain Cutlass's creator and shipwright.

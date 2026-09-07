@@ -104,7 +104,7 @@ from cutlass.ai_provider import (
 )
 
 from personality import PERSONALITY
-from creator_profile import CREATOR_PROFILE
+from creator_profile import CREATOR_PROFILE, CREATOR_NAME
 
 from features import (
     random_wisdom,
@@ -1085,6 +1085,16 @@ async def build_member_context(
 
         lines.append(
             "SPECIAL STATUS: CREATOR / SHIPWRIGHT"
+        )
+
+        lines.append(
+            "Creator canonical name: "
+            + CREATOR_NAME
+        )
+
+        lines.append(
+            "Creator address rule: use Jay or a creator title when "
+            "addressing this member directly; never invent another name."
         )
 
         lines.append(
@@ -4397,6 +4407,12 @@ LATEST:
 
 CREATOR: {creator_status}
 
+If CREATOR is YES:
+- The message author is Jay, Captain's creator and shipwright.
+- If Captain addresses the creator directly, use Jay or a title from
+  CREATOR PROFILE.
+- Never invent a different personal name for the creator.
+
 FORCE_REPLY: {force_reply}
 
 MODE: {special_mode}
@@ -4876,6 +4892,96 @@ def clean_brain_value(
 
 
     return value
+
+
+_CREATOR_GREETING_ADDRESS_RE = re.compile(
+    r"""
+    ^
+    (?P<leading>\s*)
+    (?P<salutation>(?:ahoy|arrr|aye|hello|hey|hail|greetings|well\s+met))
+    (?P<punctuation>[\s,;:-]+)
+    (?P<name>[A-Za-z][A-Za-z'’\-]{1,32})
+    (?P<suffix>[^\n]*)
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+_CREATOR_BARE_ADDRESS_RE = re.compile(
+    r"""
+    ^
+    (?P<leading>\s*)
+    (?P<name>[A-Z][A-Za-z'’\-]{1,32})
+    (?P<suffix>[,!.?]\s*.*)
+    $
+    """,
+    re.DOTALL | re.VERBOSE,
+)
+
+
+def normalize_creator_address_reply(
+    message,
+    reply
+):
+    """
+    Replace a hallucinated creator address with the canonical
+    creator name when the message author is the creator.
+    """
+
+    if not reply:
+        return reply
+
+    if not is_creator(
+        message.author.id
+    ):
+        return reply
+
+    allowed = {
+        CREATOR_NAME.casefold(),
+        "captain",
+        "shipwright",
+        "matey",
+        "crew",
+        "ahoy",
+        "aye",
+    }
+
+    match = _CREATOR_GREETING_ADDRESS_RE.match(
+        reply
+    )
+
+    if (
+        match
+        and match.group(
+            "name"
+        ).casefold() not in allowed
+    ):
+        return (
+            match.group("leading")
+            + match.group("salutation")
+            + match.group("punctuation")
+            + CREATOR_NAME
+            + match.group("suffix")
+        )
+
+    match = _CREATOR_BARE_ADDRESS_RE.match(
+        reply
+    )
+
+    if (
+        match
+        and match.group(
+            "name"
+        ).casefold() not in allowed
+    ):
+        return (
+            match.group("leading")
+            + CREATOR_NAME
+            + match.group("suffix")
+        )
+
+    return reply
 
 
 def normalize_member_evidence(
@@ -8677,6 +8783,12 @@ async def on_message(
 
 
         reply = await enforce_reply_identity_safety(
+            message,
+            reply
+        )
+
+
+        reply = normalize_creator_address_reply(
             message,
             reply
         )
