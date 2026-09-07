@@ -2,7 +2,7 @@
 
 Captain Cutlass is a Discord bot built around a shared Living Ship, pirate-world exploration, crew work, combat, history, and conversation.
 
-This repository is container-first. The provided `Dockerfile` and `docker-compose.yml` build the app, install dependencies, compile the Python sources, and keep persistent data in `/app/data`.
+This repository is container-first. The provided `Dockerfile` and `docker-compose.yml` build the app, install dependencies, compile the Python sources, keep persistent data in `/app/data`, and run a local Ollama AI service for the bot by default.
 
 ## Container setup
 
@@ -11,7 +11,7 @@ This repository is container-first. The provided `Dockerfile` and `docker-compos
 - Docker Engine
 - Docker Compose v2
 - A Discord bot token
-- An OpenAI key, or a local OpenAI-compatible endpoint
+- Optional: an OpenAI key for fallback
 
 ### 1) Create a `.env` file
 
@@ -30,49 +30,41 @@ If you just cloned the repository, create the data directory first:
 mkdir -p data
 ```
 
-Minimal OpenAI setup:
+Recommended local AI setup:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-4.1-mini
-AI_PROVIDER=openai
-AI_FALLBACK_PROVIDER=none
+AI_PROVIDER=local-first
+AI_FALLBACK_PROVIDER=openai
+LOCAL_AI_BASE_URL=http://ollama:11434/v1
+LOCAL_AI_API_KEY=ollama
+LOCAL_AI_MODEL=llama3.2
+LOCAL_AI_MAX_OUTPUT_TOKENS=512
+LOCAL_AI_TEMPERATURE=0.7
 ```
 
-Local AI setup:
+If you want OpenAI only, set:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
-AI_PROVIDER=local
-AI_FALLBACK_PROVIDER=openai
-LOCAL_AI_BASE_URL=http://your-local-endpoint:11434/v1
-LOCAL_AI_API_KEY=local
-LOCAL_AI_MODEL=your-local-model
+OPENAI_API_KEY=your_openai_api_key
+AI_PROVIDER=openai-only
+AI_FALLBACK_PROVIDER=none
 ```
-
-You can also set:
-
-- `LOCAL_AI_MAX_OUTPUT_TOKENS`
-- `LOCAL_AI_CONTEXT_TOKENS`
-- `LOCAL_AI_TEMPERATURE`
-- `AI_TIMEOUT_SECONDS`
-- `AI_RETRY_ATTEMPTS`
-- `AI_RETRY_BACKOFF_SECONDS`
 
 If you want the bot to run against a local endpoint only, set:
 
 ```env
 AI_PROVIDER=local-only
 AI_FALLBACK_PROVIDER=none
+LOCAL_AI_BASE_URL=http://your-local-endpoint:11434/v1
+LOCAL_AI_API_KEY=local
+LOCAL_AI_MODEL=your-local-model
 ```
 
-If you want the bot to use OpenAI only, set:
-
-```env
-AI_PROVIDER=openai-only
-AI_FALLBACK_PROVIDER=none
-```
+The Compose file starts Ollama on the same network as the bot. The default local base URL is `http://ollama:11434/v1`.
 
 ### 2) Start the container
 
@@ -87,8 +79,15 @@ This will:
 - build the image from `Dockerfile`
 - install Python dependencies
 - compile the app during the image build
+- start Ollama for local inference
 - start the bot container
 - persist runtime data under `/app/data`
+
+After the stack is up, pull the local model once:
+
+```bash
+docker compose exec ollama ollama pull llama3.2
+```
 
 ### 3) Check logs
 
@@ -159,6 +158,7 @@ The bot supports:
 
 - OpenAI
 - OpenAI-compatible local endpoints
+- Ollama running in the Compose stack
 
 Useful environment variables:
 
@@ -170,6 +170,8 @@ Useful environment variables:
 - `LOCAL_AI_BASE_URL`
 - `LOCAL_AI_API_KEY`
 - `LOCAL_AI_MODEL`
+- `LOCAL_AI_MAX_OUTPUT_TOKENS`
+- `LOCAL_AI_TEMPERATURE`
 
 If the selected provider is unavailable, the bot can fall back to the other provider when configured.
 
@@ -181,6 +183,7 @@ Useful commands:
 docker compose logs -f
 docker compose ps
 docker compose exec captain-cutlass python -c "import bot; print('ok')"
+docker compose exec ollama ollama list
 ```
 
 ## Notes

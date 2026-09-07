@@ -146,6 +146,15 @@ class AIGateway:
 
         return requested_tokens
 
+    def _provider_temperature(self, provider, requested_temperature):
+        if requested_temperature is not None:
+            return requested_temperature
+
+        if provider == "local" and self.config.local_temperature is not None:
+            return self.config.local_temperature
+
+        return requested_temperature
+
     def _provider_client(self, provider):
         provider = _clean_provider(provider)
 
@@ -198,6 +207,7 @@ class AIGateway:
     async def create_response(self, **kwargs):
         requested_model = kwargs.get("model")
         requested_tokens = kwargs.get("max_output_tokens")
+        requested_temperature = kwargs.get("temperature")
         errors = []
 
         for provider in self._provider_chain():
@@ -206,6 +216,10 @@ class AIGateway:
             provider_kwargs["max_output_tokens"] = self._provider_max_output_tokens(
                 provider,
                 requested_tokens,
+            )
+            provider_kwargs["temperature"] = self._provider_temperature(
+                provider,
+                requested_temperature,
             )
 
             try:
