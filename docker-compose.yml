@@ -1,12 +1,27 @@
 services:
   captain-cutlass:
+    image: captain-cutlass:latest
     build: .
     container_name: captain-cutlass
+    init: true
     restart: unless-stopped
-    
+
     env_file:
       - .env
-    
+
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-none}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-}
+      LOCAL_AI_BASE_URL: ${LOCAL_AI_BASE_URL:-}
+      LOCAL_AI_API_KEY: ${LOCAL_AI_API_KEY:-}
+      LOCAL_AI_MAX_OUTPUT_TOKENS: ${LOCAL_AI_MAX_OUTPUT_TOKENS:-}
+      LOCAL_AI_CONTEXT_TOKENS: ${LOCAL_AI_CONTEXT_TOKENS:-}
+      LOCAL_AI_TEMPERATURE: ${LOCAL_AI_TEMPERATURE:-}
+
     volumes:
       - /data/captain-cutlass/data:/app/data
       
