@@ -13,6 +13,7 @@ from ship_world import (
     consume_ship_combat_ability,
     clear_ship_combat_effects,
     apply_ship_incoming_ability,
+    record_captured_ship,
 )
 
 # =========================================================
@@ -158,7 +159,7 @@ async def handle_combat_command(
     message,
     command,
     *,
-    get_ship_settings,
+    cached_settings,
     get_ship,
     get_ship_operational_status,
     get_active_battle,
@@ -242,7 +243,7 @@ async def handle_combat_command(
     # Ship World availability
     # ---------------------------------------------------------
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         guild_id
     )
 
@@ -410,9 +411,14 @@ async def handle_combat_command(
 
                 return True
 
+            ship = await get_ship(
+                guild_id
+            )
+
             operational = (
                 await get_ship_operational_status(
-                    guild_id
+                    guild_id,
+                    ship=ship
                 )
             )
 
@@ -481,7 +487,8 @@ async def handle_combat_command(
         )
 
         operational = await get_ship_operational_status(
-            guild_id
+            guild_id,
+            ship=ship
         )
 
         if not operational["operational"]:
@@ -959,7 +966,8 @@ async def handle_combat_command(
         if ship_after:
 
             operational_after = await get_ship_operational_status(
-                guild_id
+                guild_id,
+                ship=ship_after
             )
 
             if not operational_after["operational"]:
@@ -1126,8 +1134,36 @@ async def handle_combat_command(
             award = await reward_ship(
                 guild_id,
                 reward,
-                xp
+                xp,
+                achievement_user_id=message.author.id
             )
+
+            if result.get("boarded"):
+                capture = await record_captured_ship(
+                    guild_id,
+                    result.get(
+                        "enemy_name",
+                        "an enemy vessel"
+                    ),
+                    captured_by_user_id=message.author.id,
+                    captured_by_name=message.author.display_name,
+                    reward=reward,
+                    xp_reward=xp,
+                    award_user_id=message.author.id,
+                )
+
+                if capture:
+                    text += (
+                        "\nPrize ledger entry: **#"
+                        + str(capture["id"])
+                        + "**"
+                    )
+
+                    if capture.get("milestone_text"):
+                        text += (
+                            "\n"
+                            + capture["milestone_text"]
+                        )
 
             # -------------------------------------------------
             # Combat achievements
@@ -1193,7 +1229,8 @@ async def handle_combat_command(
 
             victory_ship_status = (
                 await get_ship_operational_status(
-                    guild_id
+                    guild_id,
+                    ship=ship_after or ship
                 )
             )
 
@@ -1342,6 +1379,12 @@ async def handle_combat_command(
                     "\nThe ship reached **Level "
                     + str(award["level"])
                     + "**!"
+                )
+
+            if award.get("milestone_text"):
+                text += (
+                    "\n"
+                    + award["milestone_text"]
                 )
 
             if encounter == "naval":

@@ -110,6 +110,9 @@ async def handle_help_command(
             "`!cutlass achievements` — View achievements\n"
             "`!cutlass leaderboard` — Doubloon leaderboard\n"
             "`!cutlass crew` — Top crewmates\n"
+            "`!cutlass jobs` — Crew job board\n"
+            "`!cutlass work` — View your work ledger\n"
+            "`!cutlass work <job>` — Take a crew shift\n"
             "`!cutlass stats` — Your statistics\n"
             "`!cutlass birthday` — View your birthday\n"
             "`!cutlass birthday set <month> <day>` — Set birthday\n"
@@ -262,7 +265,9 @@ async def handle_help_command(
                 "combat and other ship actions are locked until she "
                 "recovers. Emergency recovery restores hull over time.\n\n"
                 "Crew donations build persistent contribution totals. "
-                "Contribution milestones can award bonus Doubloons."
+                "Contribution milestones can award bonus Doubloons.\n\n"
+                "Crew work stays available even when the Living Ship "
+                "is disabled."
             ),
             inline=False
         )
@@ -278,6 +283,16 @@ async def handle_help_command(
                 "Only charted islands can be reached. "
                 "Some routes also require a higher "
                 "Living Ship level."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Crew Work",
+            value=(
+                "`!c jobs` — Crew job board\n"
+                "`!c work` — Your work ledger\n"
+                "`!c work <job>` — Take a crew shift"
             ),
             inline=False
         )
@@ -571,6 +586,9 @@ async def handle_help_command(
                 "`!c ship repair`\n"
                 "`!c ship upgrades`\n"
                 "`!c ship upgrade <name>`\n"
+                "`!c jobs`\n"
+                "`!c work`\n"
+                "`!c work <job>`\n"
                 "`!c voyage`\n"
                 "`!c voyage status`\n"
                 "`!c voyage start <number>`"

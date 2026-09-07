@@ -17,6 +17,7 @@ from cutlass.commands.treasure import handle_treasure_command, check_treasure_an
 from cutlass.commands.captain import handle_captain_command
 from cutlass.commands.admin import handle_admin_command
 from cutlass.commands.parrot import handle_parrot_command
+from cutlass.commands.work import handle_work_command
 from cutlass.commands.ship import handle_ship_command
 from cutlass.commands.world import handle_world_command
 from cutlass.commands.exploration import handle_exploration_command
@@ -85,6 +86,9 @@ from cutlass.world.pirate_world import (
     end_world_event,
     discover_world_finding,
     explore_random_island,
+    count_world_discoveries,
+    count_hidden_discoveries,
+    count_world_findings,
     get_island_activity_state,
     record_island_visit,
     get_completed_island_activities,
@@ -117,15 +121,39 @@ from social_features import (
 from ship_world import (
     initialize_ship_world, ensure_ship, get_ship, get_ship_settings, set_ship_setting,
     format_ship_status, rename_ship, get_history, get_history_records, get_completed_voyages, donate, top_contributors,
-    repair_ship, format_upgrades, buy_upgrade, format_destinations,
+    repair_ship, format_upgrades, buy_upgrade, format_captured_ships, resolve_captured_ship, format_destinations,
     start_voyage, get_active_voyage, resolve_due_voyages,
     discord_timestamp,
     damage_ship, reward_ship, _reward_ship_unlocked, combat_ship_status,
     get_ship_operational_status,
     add_ship_treasury, add_ship_supplies,
     apply_exploration_outcome,
-    add_history as add_ship_history
+    add_history as add_ship_history,
+    record_captured_ship
 )
+from cutlass.world.crew_work import initialize_crew_work
+
+
+SHORT_COMMAND_ALIASES = {
+    "!cutlass repair": "!cutlass ship repair",
+    "!cutlass upgrades": "!cutlass ship upgrades",
+    "!cutlass history": "!cutlass ship history",
+    "!cutlass treasury": "!cutlass ship treasury",
+    "!cutlass destinations": "!cutlass voyage destinations",
+}
+
+STORY_COMMANDS = frozenset({
+    "!cutlass story",
+    "!c story",
+})
+
+PUNBATTLE_COMMANDS = frozenset({
+    "!cutlass punbattle",
+    "!c punbattle",
+})
+
+ISLAND_BOSS_KEYS = frozenset(BOSSES)
+ISLAND_MONSTER_KEYS = frozenset(MONSTERS)
 
 
 from parrot import (
@@ -5995,16 +6023,8 @@ async def handle_commands(
     # replacement for common Ship World commands.
     # -----------------------------------------------------
 
-    short_aliases = {
-        "!cutlass repair": "!cutlass ship repair",
-        "!cutlass upgrades": "!cutlass ship upgrades",
-        "!cutlass history": "!cutlass ship history",
-        "!cutlass treasury": "!cutlass ship treasury",
-        "!cutlass destinations": "!cutlass voyage destinations",
-    }
-
-    if command in short_aliases:
-        command = short_aliases[command]
+    if command in SHORT_COMMAND_ALIASES:
+        command = SHORT_COMMAND_ALIASES[command]
         content = command
 
     # Only Captain Cutlass commands belong in this router.
@@ -6045,6 +6065,14 @@ async def handle_commands(
         get_top_crew=get_top_crew,
         get_doubloon_leaderboard=get_doubloon_leaderboard,
         delete_user_memories=delete_user_memories
+    ):
+        return True
+
+
+    if await handle_work_command(
+        message,
+        content,
+        command,
     ):
         return True
 
@@ -6198,6 +6226,7 @@ async def handle_commands(
         get_ship_settings=get_ship_settings,
         get_ship=get_ship,
         set_ship_setting=set_ship_setting,
+        invalidate_settings_cache=invalidate_settings_cache,
         format_ship_status=format_ship_status,
         rename_ship=rename_ship,
         get_history=get_history,
@@ -6208,6 +6237,8 @@ async def handle_commands(
         repair_ship=repair_ship,
         format_upgrades=format_upgrades,
         buy_upgrade=buy_upgrade,
+        format_captured_ships=format_captured_ships,
+        resolve_captured_ship=resolve_captured_ship,
         format_destinations=format_destinations,
         get_active_voyage=get_active_voyage,
         start_voyage=start_voyage,
@@ -6233,13 +6264,17 @@ async def handle_commands(
     if await handle_exploration_command(
         message,
         command,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
+        award_achievement=award_achievement,
         get_ship=get_ship,
         get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
         get_active_boss=get_active_boss,
         explore_random_island=explore_random_island,
+        count_world_discoveries=count_world_discoveries,
+        count_hidden_discoveries=count_hidden_discoveries,
+        count_world_findings=count_world_findings,
         start_naval_battle=start_naval_battle,
         start_monster_encounter=start_monster_encounter,
         add_ship_treasury=add_ship_treasury,
@@ -6256,7 +6291,7 @@ async def handle_commands(
     if await handle_island_command(
         message,
         command,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
         get_ship=get_ship,
         get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
@@ -6274,8 +6309,9 @@ async def handle_commands(
         record_island_visit=record_island_visit,
         get_completed_island_activities=get_completed_island_activities,
         complete_island_activity=complete_island_activity,
-        valid_boss_keys=set(BOSSES),
-        valid_monster_keys=set(MONSTERS),
+        valid_boss_keys=ISLAND_BOSS_KEYS,
+        valid_monster_keys=ISLAND_MONSTER_KEYS,
+        add_world_history=add_world_history,
         post_captains_log=post_captains_log
     ):
         return True
@@ -6296,7 +6332,7 @@ async def handle_commands(
     if await handle_combat_command(
         message,
         command,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
         get_ship=get_ship,
         get_ship_operational_status=get_ship_operational_status,
         get_active_battle=get_active_battle,
@@ -6324,7 +6360,7 @@ async def handle_commands(
         message,
         command,
         is_admin=is_admin,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
         get_ship=get_ship,
         get_ship_operational_status=get_ship_operational_status,
         start_naval_battle=start_naval_battle,
@@ -6336,6 +6372,7 @@ async def handle_commands(
         flee_battle=flee_battle,
         damage_ship=damage_ship,
         reward_ship=reward_ship,
+        record_captured_ship=record_captured_ship,
         combat_ship_status=combat_ship_status,
         add_ship_history=add_ship_history,
         post_captains_log=post_captains_log
@@ -6347,7 +6384,7 @@ async def handle_commands(
         message,
         command,
         is_admin=is_admin,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
         get_ship=get_ship,
         start_monster_encounter=start_monster_encounter,
         get_active_battle=get_active_battle,
@@ -6364,7 +6401,7 @@ async def handle_commands(
     if await handle_boss_command(
         message,
         command,
-        get_ship_settings=get_ship_settings,
+        cached_settings=cached_settings,
         get_ship=get_ship,
         get_active_battle=get_active_battle,
         get_active_monster=get_active_monster,
@@ -6607,6 +6644,7 @@ async def on_ready():
         await initialize_database()
         await initialize_ship_world()
         await initialize_pirate_world()
+        await initialize_crew_work()
         await initialize_naval()
         await initialize_monsters()
         await initialize_bosses()
@@ -7859,22 +7897,10 @@ async def on_message(
         )
 
 
-        story_mode = (
-            content_lower
-            in {
-                "!cutlass story",
-                "!c story",
-            }
-        )
+        story_mode = content_lower in STORY_COMMANDS
 
 
-        punbattle_mode = (
-            content_lower
-            in {
-                "!cutlass punbattle",
-                "!c punbattle",
-            }
-        )
+        punbattle_mode = content_lower in PUNBATTLE_COMMANDS
 
 
         previous_meta = await get_member_meta(

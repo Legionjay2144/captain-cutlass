@@ -76,11 +76,96 @@ DESTINATIONS = {
 }
 
 UPGRADES = {
-    "reinforced hull": {"label": "Reinforced Hull", "cost": 1000, "max_level": 3},
-    "improved sails": {"label": "Improved Sails", "cost": 750, "max_level": 3},
-    "expanded hold": {"label": "Expanded Hold", "cost": 800, "max_level": 3},
-    "improved galley": {"label": "Improved Galley", "cost": 600, "max_level": 3},
-    "crows nest": {"label": "Crow's Nest", "cost": 900, "max_level": 3},
+    "reinforced hull": {
+        "label": "Reinforced Hull",
+        "cost": 1000,
+        "max_level": 3,
+        "min_level": 1,
+        "bonus": "+20 hull cap per level",
+    },
+    "improved sails": {
+        "label": "Improved Sails",
+        "cost": 750,
+        "max_level": 3,
+        "min_level": 1,
+        "bonus": "-5% voyage time per level",
+    },
+    "expanded hold": {
+        "label": "Expanded Hold",
+        "cost": 800,
+        "max_level": 3,
+        "min_level": 2,
+        "bonus": "+25 supply cap per level",
+    },
+    "improved galley": {
+        "label": "Improved Galley",
+        "cost": 600,
+        "max_level": 3,
+        "min_level": 3,
+        "bonus": "-5% voyage supply cost per level",
+    },
+    "crows nest": {
+        "label": "Crow's Nest",
+        "cost": 900,
+        "max_level": 3,
+        "min_level": 4,
+        "bonus": "+5% voyage treasure and XP per level",
+    },
+    "hardened keel": {
+        "label": "Hardened Keel",
+        "cost": 1200,
+        "max_level": 2,
+        "min_level": 5,
+        "bonus": "+35 hull cap per level",
+    },
+}
+
+
+SHIP_LEVEL_MILESTONES = {
+    2: {
+        "label": "First Rigging",
+        "achievement": "First Rigging",
+        "description": "The Living Ship reached Level 2.",
+    },
+    4: {
+        "label": "Deepwater Runner",
+        "achievement": "Deepwater Runner",
+        "description": "The Living Ship reached Level 4.",
+    },
+    6: {
+        "label": "Veteran Hull",
+        "achievement": "Veteran Hull",
+        "description": "The Living Ship reached Level 6.",
+    },
+    8: {
+        "label": "Flagship",
+        "achievement": "Flagship",
+        "description": "The Living Ship reached Level 8.",
+    },
+    10: {
+        "label": "Living Legend",
+        "achievement": "Living Legend",
+        "description": "The Living Ship reached Level 10.",
+    },
+}
+
+
+CAPTURE_MILESTONES = {
+    1: {
+        "label": "First Prize",
+        "achievement": "First Prize",
+        "description": "Captured the first enemy vessel.",
+    },
+    5: {
+        "label": "Prize Fleet",
+        "achievement": "Prize Fleet",
+        "description": "Captured five enemy vessels.",
+    },
+    10: {
+        "label": "Boarding Legend",
+        "achievement": "Boarding Legend",
+        "description": "Captured ten enemy vessels.",
+    },
 }
 
 
@@ -344,6 +429,23 @@ async def initialize_ship_world():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, ability_key)
         );
+        CREATE TABLE IF NOT EXISTS captured_ships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            enemy_name TEXT NOT NULL,
+            captured_by INTEGER DEFAULT 0,
+            captured_by_name TEXT DEFAULT '',
+            reward INTEGER DEFAULT 0,
+            xp_reward INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'held',
+            resolution_value INTEGER DEFAULT 0,
+            resolution_supplies INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_captured_ships_guild_status
+        ON captured_ships(guild_id, status, id DESC);
         """)
 
         # -------------------------------------------------
@@ -505,9 +607,122 @@ async def get_upgrade_levels(guild_id):
 
 def ship_caps(upgrades):
     return {
-        "hull": 100 + 20 * upgrades.get("reinforced hull", 0),
+        "hull": (
+            100
+            + 20 * upgrades.get("reinforced hull", 0)
+            + 35 * upgrades.get("hardened keel", 0)
+        ),
         "supplies": 100 + 25 * upgrades.get("expanded hold", 0),
     }
+
+
+def _ship_milestone(level):
+    return SHIP_LEVEL_MILESTONES.get(
+        int(level)
+    )
+
+
+def _next_ship_milestone(level):
+    current = int(level)
+
+    for milestone_level in sorted(
+        SHIP_LEVEL_MILESTONES
+    ):
+        if milestone_level > current:
+            return (
+                milestone_level,
+                SHIP_LEVEL_MILESTONES[milestone_level]
+            )
+
+    return None, None
+
+
+def _capture_sale_value(capture):
+    reward = int(
+        capture.get(
+            "reward",
+            0
+        )
+    )
+
+    xp_reward = int(
+        capture.get(
+            "xp_reward",
+            0
+        )
+    )
+
+    return max(
+        100,
+        reward // 2 + xp_reward // 2
+    )
+
+
+def _capture_salvage_value(capture):
+    reward = int(
+        capture.get(
+            "reward",
+            0
+        )
+    )
+
+    xp_reward = int(
+        capture.get(
+            "xp_reward",
+            0
+        )
+    )
+
+    return max(
+        50,
+        reward // 4 + xp_reward // 4
+    )
+
+
+def _capture_salvage_supplies(capture):
+    reward = int(
+        capture.get(
+            "reward",
+            0
+        )
+    )
+
+    xp_reward = int(
+        capture.get(
+            "xp_reward",
+            0
+        )
+    )
+
+    return max(
+        10,
+        reward // 25 + xp_reward // 6
+    )
+
+
+async def _award_achievement_if_possible(
+    guild_id,
+    user_id,
+    achievement,
+    description=""
+):
+    if not user_id:
+        return False
+
+    try:
+        from memory import award_achievement
+    except Exception:
+        return False
+
+    try:
+        return await award_achievement(
+            guild_id,
+            user_id,
+            achievement,
+            description
+        )
+    except Exception:
+        return False
 
 
 def operational_hull_threshold(max_hull):
@@ -778,7 +993,7 @@ async def _apply_passive_recovery_unlocked(guild_id):
     return result
 
 
-async def get_ship_operational_status(guild_id):
+async def get_ship_operational_status(guild_id, ship=None):
     """
     Return authoritative Living Ship operational state.
 
@@ -787,9 +1002,10 @@ async def get_ship_operational_status(guild_id):
     hull above zero.
     """
 
-    ship = await get_ship(
-        guild_id
-    )
+    if ship is None:
+        ship = await get_ship(
+            guild_id
+        )
 
     upgrades = await get_upgrade_levels(
         guild_id
@@ -890,6 +1106,556 @@ async def get_history_records(
 
     finally:
         await db.close()
+
+
+async def get_captured_ships(
+    guild_id,
+    *,
+    status="held",
+    limit=12
+):
+    db = await _db()
+
+    try:
+        params = [guild_id]
+        where = "guild_id = ?"
+
+        if status:
+            where += " AND status = ?"
+            params.append(status)
+
+        params.append(int(limit))
+
+        rows = await (
+            await db.execute(
+                f"""
+                SELECT
+                    id,
+                    enemy_name,
+                    captured_by,
+                    captured_by_name,
+                    reward,
+                    xp_reward,
+                    status,
+                    resolution_value,
+                    resolution_supplies,
+                    notes,
+                    created_at,
+                    updated_at
+                FROM captured_ships
+                WHERE {where}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                tuple(params)
+            )
+        ).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "enemy_name": row["enemy_name"],
+                "captured_by": row["captured_by"],
+                "captured_by_name": row["captured_by_name"],
+                "reward": row["reward"],
+                "xp_reward": row["xp_reward"],
+                "status": row["status"],
+                "resolution_value": row["resolution_value"],
+                "resolution_supplies": row["resolution_supplies"],
+                "notes": row["notes"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    finally:
+        await db.close()
+
+
+async def count_captured_ships(
+    guild_id,
+    *,
+    status=None
+):
+    db = await _db()
+
+    try:
+        params = [guild_id]
+        where = "guild_id = ?"
+
+        if status:
+            where += " AND status = ?"
+            params.append(status)
+
+        row = await (
+            await db.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM captured_ships
+                WHERE {where}
+                """,
+                tuple(params)
+            )
+        ).fetchone()
+
+        return int(
+            row["total"]
+            if row
+            else 0
+        )
+
+    finally:
+        await db.close()
+
+
+async def format_captured_ships(
+    guild_id,
+    limit=8
+):
+    captures = await get_captured_ships(
+        guild_id,
+        status="held",
+        limit=limit
+    )
+
+    lines = [
+        "**CAPTURED SHIPS**"
+    ]
+
+    if not captures:
+        lines.extend([
+            "No captured vessels are being held.",
+            "",
+            "Board a weakened enemy ship to add one to the prize ledger.",
+        ])
+        return "\n".join(lines)
+
+    for capture in captures:
+        sale_value = _capture_sale_value(
+            capture
+        )
+
+        salvage_value = _capture_salvage_value(
+            capture
+        )
+
+        salvage_supplies = _capture_salvage_supplies(
+            capture
+        )
+
+        captured_by = (
+            capture["captured_by_name"]
+            or (
+                "User "
+                + str(capture["captured_by"])
+                if capture["captured_by"]
+                else "Unknown crew"
+            )
+        )
+
+        lines.extend([
+            "",
+            (
+                "**"
+                + str(capture["id"])
+                + ". "
+                + str(capture["enemy_name"])
+                + "**"
+            ),
+            "Captured by: " + captured_by,
+            (
+                "Sell value: **"
+                + str(sale_value)
+                + " doubloons**"
+            ),
+            (
+                "Salvage yield: **"
+                + str(salvage_value)
+                + " doubloons** and **"
+                + str(salvage_supplies)
+                + " supplies**"
+            ),
+            (
+                "Use `!cutlass ship capture sell "
+                + str(capture["id"])
+                + "` or `!cutlass ship capture salvage "
+                + str(capture["id"])
+                + "`."
+            ),
+        ])
+
+    lines.extend([
+        "",
+        "Captured vessels stay on the ledger until they are sold or salvaged.",
+    ])
+
+    return "\n".join(lines)
+
+
+async def record_captured_ship(
+    guild_id,
+    enemy_name,
+    *,
+    captured_by_user_id=0,
+    captured_by_name="",
+    reward=0,
+    xp_reward=0,
+    notes="",
+    award_user_id=None,
+):
+    await ensure_ship(
+        guild_id
+    )
+
+    enemy_name = str(
+        enemy_name or "Unknown Vessel"
+    ).strip()[:160]
+
+    captured_by_name = str(
+        captured_by_name or ""
+    ).strip()[:120]
+
+    reward = max(
+        0,
+        int(reward)
+    )
+
+    xp_reward = max(
+        0,
+        int(xp_reward)
+    )
+
+    notes = str(
+        notes or ""
+    ).strip()[:500]
+
+    db = await _db()
+
+    try:
+        cursor = await db.execute(
+            """
+            INSERT INTO captured_ships (
+                guild_id,
+                enemy_name,
+                captured_by,
+                captured_by_name,
+                reward,
+                xp_reward,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                enemy_name,
+                int(captured_by_user_id or 0),
+                captured_by_name,
+                reward,
+                xp_reward,
+                notes,
+            )
+        )
+
+        capture_id = cursor.lastrowid
+
+        await db.commit()
+
+    finally:
+        await db.close()
+
+    total_captures = await count_captured_ships(
+        guild_id
+    )
+
+    milestone_text = ""
+
+    if total_captures in CAPTURE_MILESTONES:
+        milestone = CAPTURE_MILESTONES[
+            total_captures
+        ]
+
+        await add_history(
+            guild_id,
+            (
+                "Captured vessel milestone reached: "
+                + milestone["label"]
+                + " — "
+                + milestone["description"]
+            ),
+            "capture_milestone"
+        )
+
+        await _award_achievement_if_possible(
+            guild_id,
+            award_user_id,
+            milestone["achievement"],
+            milestone["description"]
+        )
+
+        milestone_text = (
+            "Captured vessel milestone reached: "
+            + milestone["label"]
+            + "."
+        )
+
+    await add_history(
+        guild_id,
+        (
+            "Enemy vessel captured: **"
+            + enemy_name
+            + "**"
+            + (
+                " by "
+                + captured_by_name
+                if captured_by_name
+                else ""
+            )
+            + "."
+        ),
+        "capture"
+    )
+
+    capture = await get_captured_ship(
+        guild_id,
+        capture_id
+    )
+
+    if capture is None:
+        return None
+
+    capture["total_captures"] = total_captures
+    capture["milestone_text"] = milestone_text
+
+    return capture
+
+
+async def get_captured_ship(
+    guild_id,
+    capture_id
+):
+    db = await _db()
+
+    milestones = []
+
+    try:
+        row = await (
+            await db.execute(
+                """
+                SELECT
+                    id,
+                    enemy_name,
+                    captured_by,
+                    captured_by_name,
+                    reward,
+                    xp_reward,
+                    status,
+                    resolution_value,
+                    resolution_supplies,
+                    notes,
+                    created_at,
+                    updated_at
+                FROM captured_ships
+                WHERE guild_id = ?
+                  AND id = ?
+                """,
+                (
+                    guild_id,
+                    int(capture_id),
+                )
+            )
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": row["id"],
+            "enemy_name": row["enemy_name"],
+            "captured_by": row["captured_by"],
+            "captured_by_name": row["captured_by_name"],
+            "reward": row["reward"],
+            "xp_reward": row["xp_reward"],
+            "status": row["status"],
+            "resolution_value": row["resolution_value"],
+            "resolution_supplies": row["resolution_supplies"],
+            "notes": row["notes"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    finally:
+        await db.close()
+
+
+async def resolve_captured_ship(
+    guild_id,
+    capture_id,
+    action
+):
+    action = " ".join(
+        str(action or "").lower().split()
+    )
+
+    if action not in {
+        "sell",
+        "salvage",
+    }:
+        return False, "Use `sell` or `salvage` when resolving a captured ship."
+
+    async with get_guild_lock(
+        guild_id
+    ):
+        await ensure_ship(
+            guild_id
+        )
+
+        capture = await get_captured_ship(
+            guild_id,
+            capture_id
+        )
+
+        if not capture:
+            return False, "That captured vessel could not be found."
+
+        if capture["status"] != "held":
+            return False, "That captured vessel has already been resolved."
+
+        upgrades = await get_upgrade_levels(
+            guild_id
+        )
+
+        max_supplies = int(
+            ship_caps(
+                upgrades
+            )["supplies"]
+        )
+
+        if action == "sell":
+            payout = _capture_sale_value(
+                capture
+            )
+
+            db = await _db()
+
+            try:
+                await db.execute(
+                    """
+                    UPDATE ships
+                    SET treasury = treasury + ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = ?
+                    """,
+                    (
+                        payout,
+                        guild_id,
+                    )
+                )
+
+                await db.execute(
+                    """
+                    UPDATE captured_ships
+                    SET status = 'sold',
+                        resolution_value = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE guild_id = ?
+                      AND id = ?
+                    """,
+                    (
+                        payout,
+                        guild_id,
+                        int(capture_id),
+                    )
+                )
+
+                await db.commit()
+
+            finally:
+                await db.close()
+
+            text = (
+                "Sold captured vessel **"
+                + capture["enemy_name"]
+                + "** for **"
+                + str(payout)
+                + " doubloons**."
+            )
+
+            await add_history(
+                guild_id,
+                text,
+                "capture_sell"
+            )
+
+            return True, text
+
+        payout = _capture_salvage_value(
+            capture
+        )
+
+        supplies = _capture_salvage_supplies(
+            capture
+        )
+
+        db = await _db()
+
+        try:
+            await db.execute(
+                """
+                UPDATE ships
+                SET treasury = treasury + ?,
+                    supplies = MIN(?, supplies + ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                """,
+                (
+                    payout,
+                    max_supplies,
+                    supplies,
+                    guild_id,
+                )
+            )
+
+            await db.execute(
+                """
+                UPDATE captured_ships
+                SET status = 'salvaged',
+                    resolution_value = ?,
+                    resolution_supplies = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+                  AND id = ?
+                """,
+                (
+                    payout,
+                    supplies,
+                    guild_id,
+                    int(capture_id),
+                )
+            )
+
+            await db.commit()
+
+        finally:
+            await db.close()
+
+        text = (
+            "Salvaged captured vessel **"
+            + capture["enemy_name"]
+            + "** for **"
+            + str(payout)
+            + " doubloons** and **"
+            + str(supplies)
+            + " supplies**."
+        )
+
+        await add_history(
+            guild_id,
+            text,
+            "capture_salvage"
+        )
+
+        return True, text
 
 
 async def get_completed_voyages(
@@ -1658,6 +2424,28 @@ async def buy_upgrade(guild_id, raw_key):
         levels = await get_upgrade_levels(guild_id)
         current = levels.get(key, 0)
         info = UPGRADES[key]
+        minimum_level = int(
+            info.get(
+                "min_level",
+                1
+            )
+        )
+
+        if int(ship["level"]) < minimum_level:
+            return (
+                False,
+                (
+                    "**UPGRADE LOCKED**\n"
+                    + info["label"]
+                    + " requires Living Ship **Level "
+                    + str(minimum_level)
+                    + "**.\n"
+                    "Current ship level: **"
+                    + str(ship["level"])
+                    + "**."
+                )
+            )
+
         if current >= info["max_level"]:
             return False, f"**{info['label']}** is already max level."
         cost = info["cost"] * (current + 1)
@@ -1666,17 +2454,47 @@ async def buy_upgrade(guild_id, raw_key):
         new_level = current + 1
         db = await _db()
         try:
-            await db.execute("UPDATE ships SET treasury=treasury-?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (cost, guild_id))
-            await db.execute("""INSERT INTO ship_upgrades (guild_id, upgrade_key, level) VALUES (?, ?, ?)
-                ON CONFLICT(guild_id, upgrade_key) DO UPDATE SET level=excluded.level""", (guild_id, key, new_level))
+            await db.execute(
+                "UPDATE ships SET treasury=treasury-?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?",
+                (
+                    cost,
+                    guild_id
+                )
+            )
+
+            await db.execute(
+                """INSERT INTO ship_upgrades (guild_id, upgrade_key, level) VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, upgrade_key) DO UPDATE SET level=excluded.level""",
+                (
+                    guild_id,
+                    key,
+                    new_level
+                )
+            )
             if key == "reinforced hull":
                 await db.execute("UPDATE ships SET hull=hull+20 WHERE guild_id=?", (guild_id,))
             elif key == "expanded hold":
                 await db.execute("UPDATE ships SET supplies=supplies+25 WHERE guild_id=?", (guild_id,))
+            elif key == "hardened keel":
+                await db.execute("UPDATE ships SET hull=hull+35 WHERE guild_id=?", (guild_id,))
+            elif key == "improved galley":
+                await db.execute("UPDATE ships SET supplies=supplies+10 WHERE guild_id=?", (guild_id,))
+            elif key == "crows nest":
+                await db.execute("UPDATE ships SET morale=MIN(100, morale+5) WHERE guild_id=?", (guild_id,))
             await db.commit()
         finally:
             await db.close()
-        text = f"**{info['label']} {new_level}** installed for **{cost} doubloons**."
+
+        text = (
+            "**"
+            + info["label"]
+            + " "
+            + str(new_level)
+            + "** installed for **"
+            + str(cost)
+            + " doubloons**."
+        )
+
         await add_history(guild_id, text, "upgrade")
         return True, text
 
@@ -1825,7 +2643,8 @@ async def start_voyage(
             )
 
         operational = await get_ship_operational_status(
-            guild_id
+            guild_id,
+            ship=ship
         )
 
         if not operational["operational"]:
@@ -1862,11 +2681,68 @@ async def start_voyage(
             guild_id
         )
 
+        improved_sails = levels.get(
+            "improved sails",
+            0
+        )
+
+        improved_galley = levels.get(
+            "improved galley",
+            0
+        )
+
+        crow_nest = levels.get(
+            "crows nest",
+            0
+        )
+
         speed = (
             1.0
-            - 0.05 * levels.get(
-                "improved sails",
-                0
+            - 0.05 * improved_sails
+        )
+
+        supply_discount = max(
+            0.75,
+            1.0 - 0.05 * improved_galley
+        )
+
+        reward_boost = (
+            1.0
+            + 0.05 * crow_nest
+        )
+
+        supply_cost = max(
+            1,
+            round(
+                info["supplies"]
+                * supply_discount
+            )
+        )
+
+        reward_min = max(
+            1,
+            round(
+                info["reward"][0]
+                * reward_boost
+            )
+        )
+
+        reward_max = max(
+            reward_min,
+            round(
+                info["reward"][1]
+                * reward_boost
+            )
+        )
+
+        xp_reward = max(
+            1,
+            round(
+                info["xp"]
+                * (
+                    1.0
+                    + 0.05 * crow_nest
+                )
             )
         )
 
@@ -1894,7 +2770,7 @@ async def start_voyage(
                 WHERE guild_id = ?
                 """,
                 (
-                    info["supplies"],
+                    supply_cost,
                     guild_id,
                 )
             )
@@ -1919,10 +2795,10 @@ async def start_voyage(
                     guild_id,
                     info["name"],
                     info["risk"],
-                    info["supplies"],
-                    info["reward"][0],
-                    info["reward"][1],
-                    info["xp"],
+                    supply_cost,
+                    reward_min,
+                    reward_max,
+                    xp_reward,
                     info["miles"],
                     _ts(started),
                     _ts(completes),
@@ -1937,11 +2813,11 @@ async def start_voyage(
         await add_history(
             guild_id,
             (
-                "Voyage begun for **"
-                + info["name"]
-                + "** ("
-                + info["risk"]
-                + " risk)."
+            "Voyage begun for **"
+            + info["name"]
+            + "** ("
+            + info["risk"]
+            + " risk)."
             ),
             "voyage_start"
         )
@@ -1950,6 +2826,12 @@ async def start_voyage(
             True,
             {
                 **info,
+                "supplies": supply_cost,
+                "reward": (
+                    reward_min,
+                    reward_max
+                ),
+                "xp": xp_reward,
                 "completes_at": _ts(
                     completes
                 ),
@@ -2311,6 +3193,11 @@ async def format_ship_status(guild_id):
         guild_id
     )
 
+    captured_held = await count_captured_ships(
+        guild_id,
+        status="held"
+    )
+
     levels = await get_upgrade_levels(
         guild_id
     )
@@ -2361,7 +3248,37 @@ async def format_ship_status(guild_id):
         f"Supplies: **{ship['supplies']}/{caps['supplies']}**",
         f"Morale: **{ship['morale']}/100**",
         f"Treasury: **{ship['treasury']} doubloons**",
+        f"Captured Ships: **{captured_held} held**",
     ]
+
+    milestone = _ship_milestone(
+        ship["level"]
+    )
+
+    if milestone:
+        lines.extend([
+            "",
+            (
+                "**SHIP MILESTONE REACHED** — "
+                + milestone["label"]
+            ),
+            milestone["description"],
+        ])
+    else:
+        next_level, next_milestone = _next_ship_milestone(
+            ship["level"]
+        )
+
+        if next_milestone:
+            lines.extend([
+                "",
+                (
+                    "Next Milestone: Level "
+                    + str(next_level)
+                    + " — "
+                    + next_milestone["label"]
+                ),
+            ])
 
     if recovering:
 
@@ -2535,11 +3452,38 @@ async def format_upgrades(guild_id):
     lines = ["**SHIP UPGRADES**"]
     for key, info in UPGRADES.items():
         level = levels.get(key, 0)
+        min_level = int(
+            info.get(
+                "min_level",
+                1
+            )
+        )
+
         if level >= info["max_level"]:
             cost = "MAX"
         else:
             cost = f"{info['cost'] * (level + 1)} doubloons"
-        lines.append(f"- **{info['label']}** {level}/{info['max_level']} - {cost}")
+
+        if level == 0 and min_level > 1:
+            unlock = f"Unlocks at ship level {min_level}"
+        else:
+            unlock = f"Unlocks at ship level {min_level}"
+
+        lines.extend([
+            (
+                "- **"
+                + info["label"]
+                + "** "
+                + str(level)
+                + "/"
+                + str(info["max_level"])
+                + " - "
+                + cost
+            ),
+            "  " + unlock,
+            "  " + info.get("bonus", ""),
+        ])
+
     lines += ["", "Use `!cutlass ship upgrade <name>`." ]
     return "\n".join(lines)
 
@@ -2672,7 +3616,8 @@ async def damage_ship(guild_id, amount):
 async def _reward_ship_unlocked(
     guild_id,
     doubloons=0,
-    xp_reward=0
+    xp_reward=0,
+    achievement_user_id=None
 ):
     """
     Award the Living Ship treasury and XP.
@@ -2688,6 +3633,8 @@ async def _reward_ship_unlocked(
 
     db = await _db()
 
+    milestones = []
+
     try:
         row = await (
             await db.execute(
@@ -2702,6 +3649,7 @@ async def _reward_ship_unlocked(
 
         level = int(row["level"])
         xp = int(row["xp"]) + xp_reward
+        starting_level = level
 
         levels_gained = 0
 
@@ -2709,6 +3657,20 @@ async def _reward_ship_unlocked(
             xp -= xp_needed(level)
             level += 1
             levels_gained += 1
+
+        for milestone_level in sorted(
+            SHIP_LEVEL_MILESTONES
+        ):
+            if starting_level < milestone_level <= level:
+                milestone = dict(
+                    SHIP_LEVEL_MILESTONES[
+                        milestone_level
+                    ]
+                )
+                milestone["level"] = milestone_level
+                milestones.append(
+                    milestone
+                )
 
         await db.execute(
             """
@@ -2734,12 +3696,53 @@ async def _reward_ship_unlocked(
 
     ship = await get_ship(guild_id)
 
+    milestone_lines = []
+
+    for milestone in milestones:
+        milestone_lines.append(
+            (
+                "Reached ship milestone **Level "
+                + str(milestone["level"])
+                + " — "
+                + milestone["label"]
+                + "**."
+            )
+        )
+
+        await add_history(
+            guild_id,
+            (
+                "Living Ship milestone reached: "
+                + milestone["label"]
+                + " (Level "
+                + str(milestone["level"])
+                + "). "
+                + milestone["description"]
+            ),
+            "milestone"
+        )
+
+        await _award_achievement_if_possible(
+            guild_id,
+            achievement_user_id,
+            milestone["achievement"],
+            milestone["description"]
+        )
+
+    milestone_text = (
+        "\n".join(milestone_lines)
+        if milestone_lines
+        else ""
+    )
+
     return {
         "doubloons": doubloons,
         "xp": xp_reward,
         "levels_gained": levels_gained,
         "level": level,
         "ship": ship,
+        "milestones": milestones,
+        "milestone_text": milestone_text,
     }
 
 
@@ -2747,13 +3750,15 @@ async def _reward_ship_unlocked(
 async def reward_ship(
     guild_id,
     doubloons=0,
-    xp_reward=0
+    xp_reward=0,
+    achievement_user_id=None
 ):
     async with get_guild_lock(guild_id):
         return await _reward_ship_unlocked(
             guild_id,
             doubloons=doubloons,
-            xp_reward=xp_reward
+            xp_reward=xp_reward,
+            achievement_user_id=achievement_user_id
         )
 
 
@@ -3013,7 +4018,8 @@ async def activate_emergency_repairs(
     )
 
     operational = await get_ship_operational_status(
-        guild_id
+        guild_id,
+        ship=ship
     )
 
     if not operational["operational"]:

@@ -1826,6 +1826,104 @@ async def get_discovered_locations(
         await db.close()
 
 
+async def count_world_discoveries(
+    guild_id,
+    user_id=None
+):
+    db = await _db()
+
+    try:
+
+        if user_id is None:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_discoveries
+                    WHERE guild_id = ?
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+        else:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_discoveries
+                    WHERE guild_id = ?
+                      AND discovered_by = ?
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                    )
+                )
+            ).fetchone()
+
+        return int(row[0] or 0)
+
+    finally:
+        await db.close()
+
+
+async def count_hidden_discoveries(
+    guild_id,
+    user_id=None
+):
+    db = await _db()
+
+    try:
+
+        if user_id is None:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_discoveries wd
+                    JOIN world_locations wl
+                      ON wl.location_key = wd.location_key
+                    WHERE wd.guild_id = ?
+                      AND wl.hidden = 1
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+        else:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_discoveries wd
+                    JOIN world_locations wl
+                      ON wl.location_key = wd.location_key
+                    WHERE wd.guild_id = ?
+                      AND wd.discovered_by = ?
+                      AND wl.hidden = 1
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                    )
+                )
+            ).fetchone()
+
+        return int(row[0] or 0)
+
+    finally:
+        await db.close()
+
+
 # ---------------------------------------------------------
 # World findings
 # ---------------------------------------------------------
@@ -2012,6 +2110,52 @@ async def get_world_findings(
             )
 
         return await cursor.fetchall()
+
+    finally:
+        await db.close()
+
+
+async def count_world_findings(
+    guild_id,
+    user_id=None
+):
+    db = await _db()
+
+    try:
+
+        if user_id is None:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_findings
+                    WHERE guild_id = ?
+                    """,
+                    (
+                        guild_id,
+                    )
+                )
+            ).fetchone()
+
+        else:
+
+            row = await (
+                await db.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM world_findings
+                    WHERE guild_id = ?
+                      AND discovered_by = ?
+                    """,
+                    (
+                        guild_id,
+                        user_id,
+                    )
+                )
+            ).fetchone()
+
+        return int(row[0] or 0)
 
     finally:
         await db.close()

@@ -7,6 +7,7 @@ async def handle_ship_command(
     get_ship_settings,
     get_ship,
     set_ship_setting,
+    invalidate_settings_cache,
     format_ship_status,
     rename_ship,
     get_history,
@@ -17,6 +18,8 @@ async def handle_ship_command(
     repair_ship,
     format_upgrades,
     buy_upgrade,
+    format_captured_ships,
+    resolve_captured_ship,
     format_destinations,
     get_active_voyage,
     start_voyage,
@@ -77,6 +80,10 @@ async def handle_ship_command(
             channel.id
         )
 
+        invalidate_settings_cache(
+            message.guild.id
+        )
+
         await message.reply(
             "Ship World set to " + channel.mention + ".",
             mention_author=False
@@ -111,6 +118,10 @@ async def handle_ship_command(
             message.guild.id,
             "enabled",
             1 if enabled else 0
+        )
+
+        invalidate_settings_cache(
+            message.guild.id
         )
 
         await message.reply(
@@ -477,6 +488,69 @@ async def handle_ship_command(
             await post_captains_log(
                 message.guild,
                 "**SHIP UPGRADE**\n" + text,
+                "ship"
+            )
+
+        return True
+
+    if command == "!cutlass ship captures":
+        await message.reply(
+            await format_captured_ships(
+                message.guild.id
+            ),
+            mention_author=False
+        )
+
+        return True
+
+    if command == "!cutlass ship capture":
+        await message.reply(
+            "Use `!cutlass ship captures` to view the prize ledger, "
+            "`!cutlass ship capture sell <id>` to sell a captured vessel, "
+            "or `!cutlass ship capture salvage <id>` to strip it for parts.",
+            mention_author=False
+        )
+
+        return True
+
+    if command.startswith(
+        "!cutlass ship capture "
+    ):
+        parts = content.split()
+
+        if len(parts) < 5:
+            await message.reply(
+                "Use: `!cutlass ship capture sell <id>` or `!cutlass ship capture salvage <id>`",
+                mention_author=False
+            )
+            return True
+
+        action = parts[3].lower().strip()
+
+        try:
+            capture_id = int(parts[4])
+        except ValueError:
+            await message.reply(
+                "Use a numeric capture id from `!cutlass ship captures`.",
+                mention_author=False
+            )
+            return True
+
+        ok, text = await resolve_captured_ship(
+            message.guild.id,
+            capture_id,
+            action
+        )
+
+        await message.reply(
+            text,
+            mention_author=False
+        )
+
+        if ok:
+            await post_captains_log(
+                message.guild,
+                "**CAPTURED SHIP**\n" + text,
                 "ship"
             )
 

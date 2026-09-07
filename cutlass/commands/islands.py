@@ -8,7 +8,7 @@ async def handle_island_command(
     message,
     command,
     *,
-    get_ship_settings,
+    cached_settings,
     get_ship,
     get_ship_operational_status,
     get_active_battle,
@@ -28,13 +28,14 @@ async def handle_island_command(
     complete_island_activity,
     valid_boss_keys,
     valid_monster_keys,
+    add_world_history,
     post_captains_log
 ):
 
     if not command.startswith("!cutlass island"):
         return False
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         message.guild.id
     )
 
@@ -66,7 +67,8 @@ async def handle_island_command(
     )
 
     operational = await get_ship_operational_status(
-        message.guild.id
+        message.guild.id,
+        ship=ship
     )
 
     if not operational["operational"]:
@@ -166,15 +168,6 @@ async def handle_island_command(
             # -------------------------------------------------
             # Physical island exploration cooldown
             # -------------------------------------------------
-
-            location_key = (
-                str(location)
-                .lower()
-                .replace("'", "")
-                .replace("’", "")
-                .replace("-", "_")
-                .replace(" ", "_")
-            )
 
             location_key = resolve_island_key(
                 location
@@ -530,6 +523,15 @@ async def handle_island_command(
                         )
 
                         if completion_won:
+                            boss_history = (
+                                message.author.display_name
+                                + " discovered "
+                                + boss["name"]
+                                + " at "
+                                + location
+                                + "."
+                            )
+
                             await add_ship_history(
                                 message.guild.id,
                                 (
@@ -540,6 +542,27 @@ async def handle_island_command(
                                     + "."
                                 ),
                                 "boss_discovery"
+                            )
+
+                            await add_world_history(
+                                message.guild.id,
+                                boss_history,
+                                "boss_discovery",
+                                8
+                            )
+
+                            await post_captains_log(
+                                message.guild,
+                                (
+                                    "**MAJOR ISLAND DISCOVERY**\n"
+                                    + message.author.display_name
+                                    + " discovered **"
+                                    + boss["name"]
+                                    + "** at **"
+                                    + location
+                                    + "**."
+                                ),
+                                "world"
                             )
 
                             text += (
@@ -571,6 +594,15 @@ async def handle_island_command(
                             "the crew missed on earlier expeditions."
                         )
 
+                    lore_history = (
+                        message.author.display_name
+                        + " uncovered "
+                        + activity["title"]
+                        + " while exploring "
+                        + location
+                        + "."
+                    )
+
                     await add_ship_history(
                         message.guild.id,
                         (
@@ -581,10 +613,17 @@ async def handle_island_command(
                         "island_lore"
                     )
 
+                    await add_world_history(
+                        message.guild.id,
+                        lore_history,
+                        "island_lore",
+                        6
+                    )
+
                     text += (
                         "\n\n**ISLAND DISCOVERY COMPLETE**\n"
                         "The discovery has been added to "
-                        "the ship's history."
+                        "the ship's and world's history."
                     )
 
                 else:
@@ -596,15 +635,6 @@ async def handle_island_command(
             await message.reply(
                 text[:1900],
                 mention_author=False
-            )
-
-            await post_captains_log(
-                message.guild,
-                (
-                    "**ISLAND EXPLORATION**\n"
-                    + text
-                )[:1900],
-                "world"
             )
 
             return True

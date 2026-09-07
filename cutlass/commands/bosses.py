@@ -2,7 +2,7 @@ async def handle_boss_command(
     message,
     command,
     *,
-    get_ship_settings,
+    cached_settings,
     get_ship,
     get_active_battle,
     get_active_monster,
@@ -21,7 +21,7 @@ async def handle_boss_command(
     ):
         return False
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         message.guild.id
     )
 
@@ -158,7 +158,8 @@ async def handle_boss_command(
             award = await reward_ship(
                 message.guild.id,
                 reward,
-                xp
+                xp,
+                achievement_user_id=message.author.id
             )
 
             text += (
@@ -176,6 +177,12 @@ async def handle_boss_command(
                     "\nShip reached **Level "
                     + str(award["level"])
                     + "**!"
+                )
+
+            if award.get("milestone_text"):
+                text += (
+                    "\n"
+                    + award["milestone_text"]
                 )
 
             await add_ship_history(

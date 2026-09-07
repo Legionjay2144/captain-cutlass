@@ -3,7 +3,7 @@ async def handle_battle_command(
     command,
     *,
     is_admin,
-    get_ship_settings,
+    cached_settings,
     get_ship,
     get_ship_operational_status,
     start_naval_battle,
@@ -15,6 +15,7 @@ async def handle_battle_command(
     flee_battle,
     damage_ship,
     reward_ship,
+    record_captured_ship,
     combat_ship_status,
     add_ship_history,
     post_captains_log
@@ -25,7 +26,7 @@ async def handle_battle_command(
     ):
         return False
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         message.guild.id
     )
 
@@ -70,7 +71,8 @@ async def handle_battle_command(
         )
 
         operational = await get_ship_operational_status(
-            message.guild.id
+            message.guild.id,
+            ship=ship
         )
 
         if not operational["operational"]:
@@ -219,7 +221,8 @@ async def handle_battle_command(
         if ship_after:
 
             operational_after = await get_ship_operational_status(
-                message.guild.id
+                message.guild.id,
+                ship=ship_after
             )
 
             if not operational_after["operational"]:
@@ -285,8 +288,36 @@ async def handle_battle_command(
             awarded = await reward_ship(
                 message.guild.id,
                 doubloons=reward,
-                xp_reward=xp_reward
+                xp_reward=xp_reward,
+                achievement_user_id=message.author.id
             )
+
+            if result.get("boarded"):
+                capture = await record_captured_ship(
+                    message.guild.id,
+                    result.get(
+                        "enemy_name",
+                        "an enemy vessel"
+                    ),
+                    captured_by_user_id=message.author.id,
+                    captured_by_name=message.author.display_name,
+                    reward=reward,
+                    xp_reward=xp_reward,
+                    award_user_id=message.author.id,
+                )
+
+                if capture:
+                    text += (
+                        "\nPrize ledger entry: **#"
+                        + str(capture["id"])
+                        + "**"
+                    )
+
+                    if capture.get("milestone_text"):
+                        text += (
+                            "\n"
+                            + capture["milestone_text"]
+                        )
 
             text += (
                 "\n\n**LIVING SHIP UPDATED**\n"
@@ -303,6 +334,12 @@ async def handle_battle_command(
                     "\nThe ship reached **Level "
                     + str(awarded["level"])
                     + "**!"
+                )
+
+            if awarded.get("milestone_text"):
+                text += (
+                    "\n"
+                    + awarded["milestone_text"]
                 )
 
             await add_ship_history(
@@ -343,7 +380,8 @@ async def handle_battle_command(
         )
 
         operational = await get_ship_operational_status(
-            message.guild.id
+            message.guild.id,
+            ship=ship
         )
 
         if not operational["operational"]:
@@ -402,7 +440,8 @@ async def handle_battle_command(
             )
 
             operational_after = await get_ship_operational_status(
-                message.guild.id
+                message.guild.id,
+                ship=ship_after
             )
 
             if not operational_after["operational"]:
@@ -477,7 +516,8 @@ async def handle_battle_command(
         )
 
         operational = await get_ship_operational_status(
-            message.guild.id
+            message.guild.id,
+            ship=ship
         )
 
         if not operational["operational"]:
@@ -538,7 +578,8 @@ async def handle_battle_command(
             )
 
             operational_after = await get_ship_operational_status(
-                message.guild.id
+                message.guild.id,
+                ship=ship_after
             )
 
             if not operational_after["operational"]:
@@ -600,7 +641,8 @@ async def handle_battle_command(
             awarded = await reward_ship(
                 message.guild.id,
                 doubloons=reward,
-                xp_reward=xp_reward
+                xp_reward=xp_reward,
+                achievement_user_id=message.author.id
             )
 
             text += (
@@ -618,6 +660,12 @@ async def handle_battle_command(
                     "\nThe ship reached **Level "
                     + str(awarded["level"])
                     + "**!"
+                )
+
+            if awarded.get("milestone_text"):
+                text += (
+                    "\n"
+                    + awarded["milestone_text"]
                 )
 
             await add_ship_history(
@@ -649,4 +697,3 @@ async def handle_battle_command(
         )
 
         return True
-

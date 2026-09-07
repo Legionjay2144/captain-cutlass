@@ -3,7 +3,7 @@ async def handle_monster_command(
     command,
     *,
     is_admin,
-    get_ship_settings,
+    cached_settings,
     get_ship,
     start_monster_encounter,
     get_active_battle,
@@ -20,7 +20,7 @@ async def handle_monster_command(
     ):
         return False
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         message.guild.id
     )
 
@@ -213,7 +213,8 @@ async def handle_monster_command(
             award = await reward_ship(
                 message.guild.id,
                 reward,
-                xp
+                xp,
+                achievement_user_id=message.author.id
             )
 
             text += (
@@ -231,6 +232,12 @@ async def handle_monster_command(
                     "\nShip reached **Level "
                     + str(award["level"])
                     + "**!"
+                )
+
+            if award.get("milestone_text"):
+                text += (
+                    "\n"
+                    + award["milestone_text"]
                 )
 
             await add_ship_history(

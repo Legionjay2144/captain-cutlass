@@ -859,7 +859,8 @@ async def naval_ship_is_operational(
     )
 
     status = await get_ship_operational_status(
-        guild_id
+        guild_id,
+        ship=ship
     )
 
     return bool(
@@ -2173,4 +2174,3 @@ async def _flee_battle_unlocked(guild_id):
             "success_chance": success_chance,
         }
     )
-

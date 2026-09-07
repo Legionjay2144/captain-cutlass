@@ -7,6 +7,7 @@ import aiosqlite
 DATABASE = "/app/data/captain.db"
 
 _db = None
+_db_init_lock = asyncio.Lock()
 _write_lock = asyncio.Lock()
 
 
@@ -15,28 +16,33 @@ async def get_db():
     global _db
 
     if _db is None:
+        async with _db_init_lock:
+            if _db is None:
+                db = await aiosqlite.connect(
+                    DATABASE
+                )
 
-        _db = await aiosqlite.connect(
-            DATABASE
-        )
+                db.row_factory = aiosqlite.Row
 
-        await _db.execute(
-            "PRAGMA journal_mode=WAL"
-        )
+                await db.execute(
+                    "PRAGMA journal_mode=WAL"
+                )
 
-        await _db.execute(
-            "PRAGMA synchronous=NORMAL"
-        )
+                await db.execute(
+                    "PRAGMA synchronous=NORMAL"
+                )
 
-        await _db.execute(
-            "PRAGMA busy_timeout=5000"
-        )
+                await db.execute(
+                    "PRAGMA busy_timeout=5000"
+                )
 
-        await _db.execute(
-            "PRAGMA temp_store=MEMORY"
-        )
+                await db.execute(
+                    "PRAGMA temp_store=MEMORY"
+                )
 
-        await _db.commit()
+                await db.commit()
+
+                _db = db
 
     return _db
 
@@ -308,7 +314,7 @@ def memory_numbers(
     return {
         int(number)
         for number in re.findall(
-            r"\\b\\d+\\b",
+            r"\b\d+\b",
             str(value or "")
         )
     }

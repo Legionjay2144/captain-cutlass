@@ -7,13 +7,17 @@ async def handle_exploration_command(
     message,
     command,
     *,
-    get_ship_settings,
+    cached_settings,
+    award_achievement,
     get_ship,
     get_ship_operational_status,
     get_active_battle,
     get_active_monster,
     get_active_boss,
     explore_random_island,
+    count_world_discoveries,
+    count_hidden_discoveries,
+    count_world_findings,
     start_naval_battle,
     start_monster_encounter,
     add_ship_treasury,
@@ -31,7 +35,7 @@ async def handle_exploration_command(
     ):
         return False
 
-    settings = await get_ship_settings(
+    settings = await cached_settings(
         message.guild.id
     )
 
@@ -47,7 +51,8 @@ async def handle_exploration_command(
     )
 
     operational = await get_ship_operational_status(
-        message.guild.id
+        message.guild.id,
+        ship=ship
     )
 
     if not operational["operational"]:
@@ -134,6 +139,21 @@ async def handle_exploration_command(
             message.author.display_name
         )
 
+        unlocked_achievements = []
+
+        async def unlock_achievement(name, description):
+            success = await award_achievement(
+                message.guild.id,
+                message.author.id,
+                name,
+                description
+            )
+
+            if success:
+                unlocked_achievements.append(
+                    name
+                )
+
         title = (
             "NEW ISLAND DISCOVERED"
             if result["new"]
@@ -163,6 +183,48 @@ async def handle_exploration_command(
             "encounter_type",
             "quiet"
         )
+
+        active_event = result.get(
+            "world_event"
+        )
+
+        if active_event:
+            event_history = (
+                message.author.display_name
+                + " explored "
+                + result["name"]
+                + " during "
+                + active_event["name"]
+                + " in "
+                + result["region"]
+                + "."
+            )
+
+            await add_world_history(
+                message.guild.id,
+                event_history,
+                "world_event",
+                int(
+                    active_event.get(
+                        "importance",
+                        5
+                    )
+                )
+            )
+
+            await post_captains_log(
+                message.guild,
+                (
+                    "**LIVING WORLD EVENT**\n"
+                    + event_history
+                ),
+                "world"
+            )
+
+            await unlock_achievement(
+                "Event Witness",
+                "Explored the Living Pirate World during an active world event."
+            )
 
         world_event = result.get(
             "world_event"
@@ -670,35 +732,30 @@ async def handle_exploration_command(
                             "world_finding"
                         )
 
+                        importance = 5
+
+                        if finding_rarity == "Rare":
+                            importance = 7
+
+                        elif finding_rarity == "Legendary":
+                            importance = 9
+
+                        await add_world_history(
+                            message.guild.id,
+                            history_text,
+                            "finding",
+                            importance
+                        )
+
                         if finding_rarity in (
                             "Rare",
                             "Legendary"
                         ):
 
-                            importance = (
-                                9
-                                if finding_rarity
-                                == "Legendary"
-                                else 7
-                            )
-
-                            await add_world_history(
-                                message.guild.id,
-                                history_text,
-                                "finding",
-                                importance
-                            )
-
-                        if (
-                            finding_rarity
-                            == "Legendary"
-                        ):
-
                             await post_captains_log(
                                 message.guild,
                                 (
-                                    "**LEGENDARY WORLD "
-                                    "FINDING**\n"
+                                    "**WORLD FINDING**\n"
                                     + message.author.display_name
                                     + " uncovered **"
                                     + finding_name
@@ -721,10 +778,79 @@ async def handle_exploration_command(
                     "exploration"
                 )
 
+        if result["new"]:
+
+            discovery_count = await count_world_discoveries(
+                message.guild.id,
+                message.author.id
+            )
+
+            if discovery_count == 1:
+                await unlock_achievement(
+                    "Charted Waters",
+                    "Discovered an island for the first time."
+                )
+
+            if discovery_count == 5:
+                await unlock_achievement(
+                    "Cartographer",
+                    "Discovered five islands."
+                )
+
+            if discovery_count == 10:
+                await unlock_achievement(
+                    "Master Cartographer",
+                    "Discovered ten islands."
+                )
+
+            if result.get("hidden"):
+                hidden_discovery_count = await count_hidden_discoveries(
+                    message.guild.id,
+                    message.author.id
+                )
+
+                if hidden_discovery_count == 1:
+                    await unlock_achievement(
+                        "Hidden Passage",
+                        "Discovered a hidden island."
+                    )
+
+        if finding_discovered:
+
+            finding_count = await count_world_findings(
+                message.guild.id,
+                message.author.id
+            )
+
+            if finding_count == 1:
+                await unlock_achievement(
+                    "Field Naturalist",
+                    "Discovered a world finding for the first time."
+                )
+
+            if finding_rarity == "Legendary":
+                await unlock_achievement(
+                    "Legend Hunter",
+                    "Discovered a legendary world finding."
+                )
+
         await message.reply(
             text[:1900],
             mention_author=False
         )
+
+        if unlocked_achievements:
+            await message.channel.send(
+                (
+                    message.author.display_name
+                    + " earned "
+                    + ", ".join(
+                        "**" + achievement + "**"
+                        for achievement in unlocked_achievements
+                    )
+                    + "."
+                )
+            )
 
         if result["new"]:
 
