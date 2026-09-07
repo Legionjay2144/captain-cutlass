@@ -700,6 +700,253 @@ def invalidate_settings_cache(
     )
 
 
+CONVERSATION_TOPIC_RULES = (
+    (
+        "voyage",
+        "voyage / sailing",
+        (
+            "voyage",
+            "voyages",
+            "sail",
+            "sailing",
+            "set sail",
+            "destination",
+            "route",
+            "current voyage",
+            "where are we sailing",
+        ),
+    ),
+    (
+        "battle",
+        "naval battle",
+        (
+            "battle",
+            "battles",
+            "fight",
+            "fighting",
+            "combat",
+            "enemy ship",
+            "attack",
+            "board",
+            "defend",
+            "flee",
+        ),
+    ),
+    (
+        "monster",
+        "sea monster encounter",
+        (
+            "monster",
+            "monsters",
+            "kraken",
+            "sea monster",
+        ),
+    ),
+    (
+        "boss",
+        "boss encounter",
+        (
+            "boss",
+            "bosses",
+            "legendary boss",
+        ),
+    ),
+    (
+        "repair",
+        "ship recovery and crew work",
+        (
+            "repair",
+            "repairs",
+            "hull",
+            "maintenance",
+            "patch the hull",
+            "emergency repairs",
+            "crew work",
+            "crew shift",
+            "work shift",
+        ),
+    ),
+    (
+        "exploration",
+        "exploration and discoveries",
+        (
+            "explore",
+            "exploration",
+            "island",
+            "islands",
+            "discover",
+            "discovered",
+            "treasure",
+            "lore",
+            "world map",
+            "findings",
+        ),
+    ),
+    (
+        "humor",
+        "jokes or puns",
+        (
+            "joke",
+            "pun",
+            "roast",
+            "tease",
+            "laugh",
+            "funny",
+            "make me laugh",
+        ),
+    ),
+    (
+        "identity",
+        "identity or pronouns",
+        (
+            "pronouns",
+            "gender",
+            "identity",
+        ),
+    ),
+    (
+        "help",
+        "command help",
+        (
+            "help",
+            "commands",
+            "what command",
+            "how do i",
+            "how do we",
+            "what can i do",
+            "what can we do",
+        ),
+    ),
+)
+
+
+HISTORY_TOPIC_RULES = {
+    "voyage": {
+        "label": "voyage",
+        "event_types": ("voyage_complete",),
+        "keywords": (),
+    },
+    "battle": {
+        "label": "battle",
+        "event_types": ("battle_boarding", "battle_victory"),
+        "keywords": (),
+    },
+    "monster": {
+        "label": "sea monster encounter",
+        "event_types": ("monster_victory",),
+        "keywords": (),
+    },
+    "boss": {
+        "label": "boss encounter",
+        "event_types": ("boss_victory",),
+        "keywords": (),
+    },
+    "repair": {
+        "label": "crew repair work",
+        "event_types": ("crew_work", "ship_restored"),
+        "keywords": ("repair", "maintenance", "hull", "emergency", "patch"),
+    },
+    "exploration": {
+        "label": "exploration",
+        "event_types": (
+            "exploration",
+            "exploration_treasure",
+            "island_treasure",
+            "island_lore",
+            "island_supplies",
+        ),
+        "keywords": (),
+    },
+}
+
+
+def classify_conversation_topic(text):
+    """
+    Return a short label for the recent conversation subject.
+
+    The label is used as a prompt hint only. It does not drive any
+    gameplay or memory writes.
+    """
+
+    lowered = str(text or "").lower()
+
+    if not lowered.strip():
+        return None
+
+    for key, label, keywords in CONVERSATION_TOPIC_RULES:
+        if any(keyword in lowered for keyword in keywords):
+            return {
+                "key": key,
+                "label": label,
+            }
+
+    return None
+
+
+def summarize_recent_conversation(rows):
+    """
+    Summarize the latest meaningful recent chat subject.
+    """
+
+    for row in reversed(list(rows or [])):
+        try:
+            speaker = row[0]
+            content = row[1]
+        except Exception:
+            if isinstance(row, dict):
+                speaker = row.get("username", "Someone")
+                content = row.get("content", "")
+            else:
+                continue
+
+        topic = classify_conversation_topic(content)
+        if topic is None:
+            continue
+
+        return {
+            "topic": topic["label"],
+            "speaker": str(speaker),
+            "excerpt": str(content or "")[:180],
+        }
+
+    return None
+
+
+def classify_history_topic(text):
+    """
+    Return the history topic key implied by a message, if any.
+    """
+
+    lowered = str(text or "").lower()
+
+    if not lowered.strip():
+        return None
+
+    for key, _, keywords in CONVERSATION_TOPIC_RULES:
+        if key in HISTORY_TOPIC_RULES and any(keyword in lowered for keyword in keywords):
+            return key
+
+    return None
+
+
+def _history_records_for_topic(records, topic_key):
+    rule = HISTORY_TOPIC_RULES.get(topic_key)
+    if rule is None:
+        return []
+
+    filtered = []
+    for record in records or []:
+        content = str(record.get("content") or "")
+        event_type = str(record.get("event_type") or "")
+        if event_type not in rule["event_types"]:
+            continue
+        if rule["keywords"] and not any(keyword in content.lower() for keyword in rule["keywords"]):
+            continue
+        filtered.append(record)
+
+    return filtered
+
+
 async def cached_settings(
     guild_id
 ):
@@ -742,10 +989,27 @@ async def build_conversation(
         max_message_id=max_message_id
     )
 
-    return "\n".join(
+    lines = []
+
+    summary = summarize_recent_conversation(rows)
+    if summary:
+        lines.extend([
+            "RECENT SUBJECT: " + summary["topic"],
+            (
+                "SUBJECT ANCHOR: "
+                + summary["speaker"]
+                + ": "
+                + summary["excerpt"]
+            ),
+            "",
+        ])
+
+    lines.extend(
         f"{name}: {content[:500]}"
         for name, content in rows
     )
+
+    return "\n".join(lines)
 
 
 async def build_member_context(
@@ -2606,13 +2870,14 @@ async def resolve_authoritative_question(
 
 
     # -----------------------------------------------------
-    # Conversational voyage follow-up
+    # Conversational history follow-up
     #
-    # "What about the one before that?" should resolve to
-    # voyage #2 when recent conversation was about voyages.
+    # "What about the one before that?" should resolve to the
+    # previous recorded event when recent conversation was about
+    # voyages, battles, monsters, bosses, repairs, or exploration.
     # -----------------------------------------------------
 
-    voyage_followup_patterns = (
+    history_followup_patterns = (
         "one before that",
         "the one before that",
         "what about the one before that",
@@ -2622,7 +2887,7 @@ async def resolve_authoritative_question(
 
     if any(
         phrase in content
-        for phrase in voyage_followup_patterns
+        for phrase in history_followup_patterns
     ):
 
         recent = await get_recent_messages(
@@ -2631,19 +2896,18 @@ async def resolve_authoritative_question(
             8
         )
 
-        recent_text = " ".join(
-            str(row[1]).lower()
-            for row in recent
-        )
+        recent_topic = None
 
-        voyage_context = (
-            "last voyage" in recent_text
-            or "latest voyage" in recent_text
-            or "recorded voyage" in recent_text
-            or "voyage before" in recent_text
-        )
+        for row in reversed(recent):
 
-        if voyage_context:
+            recent_topic = classify_history_topic(
+                row[1]
+            )
+
+            if recent_topic:
+                break
+
+        if recent_topic == "voyage":
 
             voyages = await get_completed_voyages(
                 message.guild.id,
@@ -2651,9 +2915,7 @@ async def resolve_authoritative_question(
             )
 
             if len(voyages) >= 2:
-
                 voyage = voyages[1]
-
                 return (
                     "The voyage before that: "
                     + str(voyage["content"])
@@ -2662,6 +2924,134 @@ async def resolve_authoritative_question(
             return (
                 "I don't have an older completed voyage "
                 "recorded before that one, matey."
+            )
+
+        if recent_topic in HISTORY_TOPIC_RULES:
+
+            records = await get_history_records(
+                message.guild.id,
+                limit=20
+            )
+
+            topic_records = _history_records_for_topic(
+                records,
+                recent_topic
+            )
+
+            if len(topic_records) >= 2:
+                return (
+                    "The "
+                    + HISTORY_TOPIC_RULES[recent_topic]["label"]
+                    + " before that: "
+                    + str(topic_records[1]["content"])
+                )
+
+            if topic_records:
+                return (
+                    "I only have one "
+                    + HISTORY_TOPIC_RULES[recent_topic]["label"]
+                    + " recorded, matey."
+                )
+
+    history_topic_queries = (
+        (
+            "battle",
+            (
+                "last battle",
+                "latest battle",
+                "most recent battle",
+                "previous battle",
+                "what happened on our last battle",
+                "what happened during our last battle",
+                "what happened in our last battle",
+                "last fight",
+                "latest fight",
+                "most recent fight",
+            ),
+            "Our latest battle: ",
+        ),
+        (
+            "monster",
+            (
+                "last monster",
+                "latest monster",
+                "most recent monster",
+                "previous monster",
+                "what happened on our last monster",
+                "what happened during our last monster",
+                "last sea monster",
+            ),
+            "Our latest sea monster encounter: ",
+        ),
+        (
+            "boss",
+            (
+                "last boss",
+                "latest boss",
+                "most recent boss",
+                "previous boss",
+                "what happened on our last boss",
+                "what happened during our last boss",
+                "last boss fight",
+            ),
+            "Our latest boss encounter: ",
+        ),
+        (
+            "repair",
+            (
+                "last repair",
+                "latest repair",
+                "most recent repair",
+                "previous repair",
+                "last crew work",
+                "latest crew work",
+                "last maintenance",
+                "latest maintenance",
+                "what happened on our last repair",
+                "what happened during our last repair",
+            ),
+            "Our latest crew repair work: ",
+        ),
+        (
+            "exploration",
+            (
+                "last exploration",
+                "latest exploration",
+                "most recent exploration",
+                "previous exploration",
+                "last island",
+                "latest island",
+                "what happened on our last exploration",
+                "what happened during our last exploration",
+            ),
+            "Our latest exploration: ",
+        ),
+    )
+
+    for topic_key, phrases, prefix in history_topic_queries:
+
+        if any(
+            phrase in content
+            for phrase in phrases
+        ):
+
+            records = await get_history_records(
+                message.guild.id,
+                limit=20
+            )
+
+            topic_records = _history_records_for_topic(
+                records,
+                topic_key
+            )
+
+            if topic_records:
+                return prefix + str(topic_records[0]["content"])
+
+            return (
+                "I don't have a recorded "
+                + HISTORY_TOPIC_RULES[topic_key]["label"]
+                + " yet, matey."
             )
 
 
