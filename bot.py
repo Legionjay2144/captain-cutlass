@@ -97,7 +97,11 @@ from cutlass.world.pirate_world import (
 
 from discord.ext import tasks
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+
+from cutlass.ai_provider import (
+    build_ai_gateway,
+    format_ai_status,
+)
 
 from personality import PERSONALITY
 from creator_profile import CREATOR_PROFILE
@@ -266,10 +270,6 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv(
     "DISCORD_TOKEN"
-)
-
-OPENAI_API_KEY = os.getenv(
-    "OPENAI_API_KEY"
 )
 
 OPENAI_MODEL = os.getenv(
@@ -447,9 +447,7 @@ else:
     ALLOWED_CHANNELS = set()
 
 
-ai = AsyncOpenAI(
-    api_key=OPENAI_API_KEY
-)
+ai = build_ai_gateway()
 
 
 intents = discord.Intents.default()
@@ -6534,7 +6532,9 @@ async def handle_commands(
         content,
         is_admin=is_admin,
         set_guild_setting=set_guild_setting,
-        invalidate_settings_cache=invalidate_settings_cache
+        invalidate_settings_cache=invalidate_settings_cache,
+        get_ai_status=lambda: ai,
+        format_ai_status=format_ai_status
     ):
         return True
 
@@ -7100,6 +7100,10 @@ async def on_ready():
     print(
         "Model: "
         + OPENAI_MODEL
+    )
+
+    print(
+        format_ai_status(ai)
     )
 
     print(
@@ -8735,10 +8739,26 @@ if __name__ == "__main__":
         )
 
 
-    if not OPENAI_API_KEY:
+    ai_status = ai.describe()
+    has_openai_key = bool(os.getenv("OPENAI_API_KEY"))
+    has_local_endpoint = bool(os.getenv("LOCAL_AI_BASE_URL"))
 
+    if (
+        ai_status["provider"] == "openai"
+        and not has_openai_key
+        and not (ai_status["fallback_provider"] == "local" and has_local_endpoint)
+    ):
         raise RuntimeError(
             "OPENAI_API_KEY missing."
+        )
+
+    if (
+        ai_status["provider"] == "local"
+        and not has_local_endpoint
+        and not (ai_status["fallback_provider"] == "openai" and has_openai_key)
+    ):
+        raise RuntimeError(
+            "LOCAL_AI_BASE_URL missing."
         )
 
 

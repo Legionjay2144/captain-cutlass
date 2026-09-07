@@ -1,3 +1,6 @@
+import asyncio
+
+
 async def handle_admin_command(
     message,
     command,
@@ -6,6 +9,8 @@ async def handle_admin_command(
     is_admin,
     set_guild_setting,
     invalidate_settings_cache,
+    get_ai_status=None,
+    format_ai_status=None,
 ):
     """
     Handle Captain Cutlass administrative settings.
@@ -148,6 +153,41 @@ async def handle_admin_command(
                 if value == "on"
                 else "Roleplay event mode disabled."
             ),
+            mention_author=False
+        )
+
+        return True
+
+
+    # =====================================================
+    # AI STATUS
+    # =====================================================
+
+    if command in (
+        "!cutlass ai",
+        "!cutlass ai status",
+    ):
+
+        if not is_admin(message):
+            await message.reply(
+                "Only the Admiralty may inspect AI status.",
+                mention_author=False
+            )
+            return True
+
+        if get_ai_status is None or format_ai_status is None:
+            await message.reply(
+                "AI status is unavailable right now.",
+                mention_author=False
+            )
+            return True
+
+        status = get_ai_status()
+        if asyncio.iscoroutine(status):
+            status = await status
+
+        await message.reply(
+            format_ai_status(status),
             mention_author=False
         )
 
