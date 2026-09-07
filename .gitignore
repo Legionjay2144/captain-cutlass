@@ -16,3 +16,4 @@ data/captain.db-shm
 *.bak
 *.bak.*
 *.broken-*
+*.before-p4-checkpoint9
