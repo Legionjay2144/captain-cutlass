@@ -954,6 +954,8 @@ def _looks_like_help_request(text):
         r"\bcommands?\b",
         r"\bwhat\s+can\s+i\s+do\b",
         r"\bwhat\s+can\s+we\s+do\b",
+        r"\bwhat\s+(?:achievements?|awards?|stats|statistics|profile|memories|birthday|relationship)\b",
+        r"\bmy\s+(?:achievements?|awards?|stats|statistics|profile|memories|birthday|relationship)\b",
         r"\bwhere\s+can\s+(?:i|we)\b",
         r"\bwhat\s+.+\s+are\s+available\b",
         r"\bshow\s+(?:me\s+)?(?:the\s+)?",
