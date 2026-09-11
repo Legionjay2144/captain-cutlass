@@ -4,6 +4,193 @@ Captain Cutlass is a Discord bot built around a shared Living Ship, pirate-world
 
 This repository is container-first. The provided `Dockerfile` and `docker-compose.yml` build the app, install dependencies, compile the Python sources, keep persistent data in `/app/data`, and use OpenAI by default.
 
+## Features
+
+Captain Cutlass is a persistent pirate-world Discord bot. Crew members can talk with the Captain, earn Doubloons, build up a shared Living Ship, explore a growing world, fight enemies, work jobs, and leave behind a history for the server.
+
+### Living Ship
+
+The Living Ship is shared across the server and persists in the database. It has a name, hull, sails, supplies, morale, treasury, XP, level, upgrades, voyage history, captured ships, and recovery state.
+
+Supported ship features include:
+
+- Server-wide ship status with hull, supplies, morale, treasury, level, XP, location, and next milestone.
+- Ship World enable/disable controls and a dedicated ship channel.
+- Ship renaming.
+- Treasury donations and top contributor tracking.
+- Paid ship repairs through `!c repair` / `!c ship repair`.
+- Passive recovery when the ship is disabled.
+- Crew maintenance jobs that help restore the ship toward operational hull.
+- Ship upgrades and level-gated progression.
+- Voyage destinations, voyage status, and voyage starts.
+- Captured ship viewing, selling, and salvaging.
+- Ship history for major events.
+
+### Pirate World And Exploration
+
+Captain Cutlass has a persistent world map with regions, islands, discoveries, findings, and world history.
+
+World features include:
+
+- Known regions and discovered islands.
+- Hidden locations that only appear after discovery.
+- Region and island discovery tracking.
+- World map, world locations, discoveries, findings, events, and history.
+- Scouting with `!c explore`.
+- Island inspection with `!c island` and named island lookup like `!c island blacktooth cove`.
+- Island exploration with treasure, supplies, lore, monsters, and bosses.
+- Revisit tracking and exploration cooldowns.
+- Major discoveries recorded into world history.
+
+Current content includes multiple regions, 14 island content entries, hidden discoveries, island activities, world findings, 8 sea monsters, 5 bosses, and 25 naval enemies.
+
+### Combat
+
+Combat is unified around the active encounter. Crew members can use the same core commands whether the ship is facing a naval enemy, sea monster, or boss.
+
+Combat features include:
+
+- `!c attack`, `!c defend`, `!c board`, and `!c flee`.
+- Naval battles with enemy ships and captains.
+- Sea monster encounters.
+- Boss encounters with phases.
+- Combat scaling tied to ship progression.
+- Automatic encounter termination when the Living Ship becomes non-operational.
+- Boarding and captured vessel flow for weakened naval enemies.
+- Ship combat abilities:
+  - Full Broadside
+  - Brace for Impact
+  - Emergency Repairs
+  - Rally the Crew
+- Combat rewards, ship XP, treasury rewards, and achievements.
+
+### Crew Work And Jobs
+
+Crew Work gives members a way to earn income and support the ship outside major voyages and battles. Jobs have cooldowns, risk, unlock rules, payouts, outcomes, and ship benefits.
+
+Current jobs include:
+
+- Dockside Hands
+- Salvager
+- Shipwright
+- Merchant Runner
+- Bounty Hunter
+- Patch the Hull
+- Salvage Lumber
+- Dockyard Assistance
+- Clear the Bilge
+- Help the Shipwright
+- Scavenge Repair Materials
+- Emergency Repairs
+
+Crew Work supports:
+
+- `!c jobs` for the job board.
+- `!c work` for a personal work ledger.
+- `!c work <job>` to take a shift.
+- Doubloon payouts.
+- Ship treasury and supply bonuses.
+- Maintenance jobs that restore hull during recovery.
+- Job cooldowns.
+- Unlocks tied to ship level, discoveries, captures, and recovery state.
+- Work and repair achievements.
+- Individual contribution tracking for recovery work.
+
+### Economy, Profiles, And Achievements
+
+Members can build up a persistent profile through play and conversation.
+
+Crew systems include:
+
+- Doubloon balances.
+- Leaderboards.
+- Crew profiles.
+- Member stats.
+- Achievements.
+- Birthdays.
+- Relationship state with the Captain.
+- Memories, running jokes, and relationship events.
+- `!c forgetme` for removing stored member memories.
+
+### Conversation And Personality
+
+Captain Cutlass can answer naturally while staying grounded in the bot's real command set and server state.
+
+Conversation features include:
+
+- Pirate-themed Captain Cutlass personality.
+- Natural command help for questions like "what jobs are available?" or "how do I repair the ship?"
+- Follow-up context for recent messages.
+- Relationship and memory context.
+- Creator recognition.
+- Gender-neutral behavior when gender or pronouns are unknown.
+- Routing that separates commands, gameplay questions, jokes, hypotheticals, and normal conversation.
+- Grounding so gameplay help points to real commands instead of invented syntax.
+
+### Parrot, Lore, And Fun
+
+Captain Cutlass includes a persistent parrot companion and several lore/fun systems.
+
+Fun and lore features include:
+
+- Parrot status, mood, relationship, memories, jokes, and history.
+- Parrot banter.
+- Captain lore and server lore.
+- Captain canon.
+- Quotes and saved quotes.
+- Pirate wisdom.
+- Captain's Journal.
+- Timeline.
+- Story mode.
+- Pun battle.
+- Treasure clues and treasure hunts.
+- Weekly chronicles.
+- Captain mood.
+
+### Admin And Server Controls
+
+Admiralty commands let server admins configure the bot for each Discord server.
+
+Admin features include:
+
+- Welcome messages and welcome channel controls.
+- Returner messages and returner day thresholds.
+- Captain's Log channel controls.
+- Manual chronicle generation.
+- Ship World channel and enable/disable controls.
+- Quiet mode.
+- Mood and event mode controls.
+- AI status command.
+- Treasure hunt setup.
+
+### AI Provider Support
+
+Captain Cutlass uses a provider-agnostic AI gateway. OpenAI is the default, and OpenAI-compatible local endpoints are supported.
+
+AI features include:
+
+- OpenAI provider mode.
+- Local-only mode.
+- OpenAI-first or local-first fallback modes.
+- Configurable model names.
+- Configurable local endpoint and API key.
+- Configurable timeout, retry, token, and temperature settings.
+- Runtime AI status output.
+- Gameplay command execution kept separate from generated text.
+
+### Docker And Persistence
+
+Captain Cutlass is designed to run from Docker Compose.
+
+Deployment features include:
+
+- Container-first setup.
+- Persistent `/app/data` volume.
+- Build-time Python compilation.
+- `.dockerignore` to avoid copying local data, caches, and secrets.
+- Optional Ollama service through the `local-ai` Compose profile.
+- Environment-driven configuration through `.env`.
+
 ## Container setup
 
 ### Prerequisites
