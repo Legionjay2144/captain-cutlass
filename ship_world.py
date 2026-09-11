@@ -1047,10 +1047,48 @@ def xp_needed(level):
 
 
 async def add_history(guild_id, content, event_type="event"):
+    content = str(content or "").strip()[:1800]
+    event_type = str(event_type or "event").strip()[:50] or "event"
+    if not content:
+        return False
+
     db = await _db()
     try:
-        await db.execute("INSERT INTO ship_history (guild_id, event_type, content) VALUES (?, ?, ?)", (guild_id, event_type, content))
+        existing = await (
+            await db.execute(
+                """
+                SELECT id
+                FROM ship_history
+                WHERE guild_id = ?
+                  AND event_type = ?
+                  AND LOWER(content) = LOWER(?)
+                  AND datetime(created_at) >= datetime('now', '-10 minutes')
+                LIMIT 1
+                """,
+                (
+                    guild_id,
+                    event_type,
+                    content,
+                )
+            )
+        ).fetchone()
+
+        if existing:
+            return False
+
+        await db.execute(
+            """
+            INSERT INTO ship_history (guild_id, event_type, content)
+            VALUES (?, ?, ?)
+            """,
+            (
+                guild_id,
+                event_type,
+                content,
+            )
+        )
         await db.commit()
+        return True
     finally:
         await db.close()
 
@@ -1058,8 +1096,29 @@ async def add_history(guild_id, content, event_type="event"):
 async def get_history(guild_id, limit=12):
     db = await _db()
     try:
-        rows = await (await db.execute("SELECT content, created_at FROM ship_history WHERE guild_id = ? ORDER BY id DESC LIMIT ?", (guild_id, limit))).fetchall()
-        return [(r["content"], r["created_at"]) for r in rows]
+        rows = await (
+            await db.execute(
+                """
+                SELECT event_type, content, created_at
+                FROM ship_history
+                WHERE guild_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (
+                    guild_id,
+                    limit,
+                )
+            )
+        ).fetchall()
+        return [
+            (
+                r["content"],
+                r["created_at"],
+                r["event_type"],
+            )
+            for r in rows
+        ]
     finally:
         await db.close()
 

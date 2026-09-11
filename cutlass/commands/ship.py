@@ -1,3 +1,41 @@
+SHIP_HISTORY_LABELS = {
+    "battle_boarding": "Boarding",
+    "battle_victory": "Naval Victory",
+    "boss_victory": "Boss Victory",
+    "capture": "Capture",
+    "capture_milestone": "Capture Milestone",
+    "capture_salvage": "Capture Salvaged",
+    "capture_sell": "Capture Sold",
+    "crew_work": "Crew Work",
+    "monster_victory": "Monster Victory",
+    "rename": "Renamed",
+    "ship_restored": "Restored",
+    "upgrade": "Upgrade",
+    "voyage_complete": "Voyage Complete",
+}
+
+
+def _history_label(event_type):
+    return SHIP_HISTORY_LABELS.get(
+        str(event_type or "event"),
+        str(event_type or "event").replace("_", " ").title(),
+    )
+
+
+def _format_history_row(row):
+    content = row[0]
+    created_at = row[1] if len(row) > 1 else ""
+    event_type = row[2] if len(row) > 2 else "event"
+
+    date_text = str(created_at or "")[:10]
+    prefix = "**" + _history_label(event_type) + "**"
+
+    if date_text:
+        prefix += " · " + date_text
+
+    return "- " + prefix + " — " + str(content)
+
+
 async def handle_ship_command(
     message,
     content,
@@ -268,7 +306,7 @@ async def handle_ship_command(
                 (
                     "**SHIP HISTORY**\n"
                     + "\n".join(
-                        "- " + row[0]
+                        _format_history_row(row)
                         for row in rows
                     )
                 )[:1900],

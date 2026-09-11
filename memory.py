@@ -2922,16 +2922,35 @@ async def mark_birthday_rewarded(guild_id, user_id, year):
 
 
 async def add_log_entry(guild_id, content, entry_type="event"):
-    content = content.strip()[:1800]
+    content = str(content or "").strip()[:1800]
+    entry_type = str(entry_type or "event").strip()[:50] or "event"
     if not content:
-        return
+        return False
     db = await get_db()
     async with _write_lock:
+        cursor = await db.execute("""
+            SELECT id
+            FROM captain_log_entries
+            WHERE guild_id = ?
+              AND entry_type = ?
+              AND LOWER(content) = LOWER(?)
+              AND datetime(created_at) >= datetime('now', '-10 minutes')
+            LIMIT 1
+        """, (
+            guild_id,
+            entry_type,
+            content,
+        ))
+
+        if await cursor.fetchone():
+            return False
+
         await db.execute("""
             INSERT INTO captain_log_entries (guild_id, entry_type, content)
             VALUES (?, ?, ?)
-        """, (guild_id, entry_type[:50], content))
+        """, (guild_id, entry_type, content))
         await db.commit()
+        return True
 
 
 async def get_log_entries(guild_id, limit=25, since=None):

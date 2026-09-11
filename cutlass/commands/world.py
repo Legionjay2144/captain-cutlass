@@ -1,3 +1,36 @@
+WORLD_HISTORY_LABELS = {
+    "discovery": "Discovery",
+    "event": "World Event",
+    "finding": "Finding",
+    "island_boss": "Island Boss",
+    "island_lore": "Island Lore",
+    "island_supplies": "Island Supplies",
+    "island_treasure": "Island Treasure",
+    "world": "World",
+}
+
+
+def _world_history_label(event_type):
+    return WORLD_HISTORY_LABELS.get(
+        str(event_type or "world"),
+        str(event_type or "world").replace("_", " ").title(),
+    )
+
+
+def _format_world_history_row(row):
+    event_type = row["event_type"]
+    content = row["content"]
+    created_at = row["created_at"]
+    date_text = str(created_at or "")[:10]
+
+    prefix = "**" + _world_history_label(event_type) + "**"
+
+    if date_text:
+        prefix += " · " + date_text
+
+    return "• " + prefix + " — " + str(content)
+
+
 async def handle_world_command(
     message,
     command,
@@ -92,7 +125,7 @@ async def handle_world_command(
         text = (
             "**PIRATE WORLD HISTORY**\n"
             + "\n".join(
-                "• " + row["content"]
+                _format_world_history_row(row)
                 for row in rows
             )
         )

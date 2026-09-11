@@ -1663,10 +1663,37 @@ async def add_world_history(
     event_type="world",
     importance=5
 ):
+    content = str(content or "").strip()[:1800]
+    event_type = str(event_type or "world").strip()[:50] or "world"
+
+    if not content:
+        return False
 
     db = await _db()
 
     try:
+        existing = await (
+            await db.execute(
+                """
+                SELECT id
+                FROM world_history
+                WHERE guild_id = ?
+                  AND event_type = ?
+                  AND LOWER(content) = LOWER(?)
+                  AND datetime(created_at) >= datetime('now', '-10 minutes')
+                LIMIT 1
+                """,
+                (
+                    guild_id,
+                    event_type,
+                    content,
+                )
+            )
+        ).fetchone()
+
+        if existing:
+            return False
+
         await db.execute("""
             INSERT INTO world_history (
                 guild_id,
@@ -1683,6 +1710,7 @@ async def add_world_history(
         ))
 
         await db.commit()
+        return True
 
     finally:
         await db.close()
