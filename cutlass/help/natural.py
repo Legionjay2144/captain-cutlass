@@ -114,6 +114,98 @@ COMMAND_HELP = {
             "my stats",
         ),
     },
+    "crew": {
+        "command": "!c crew",
+        "description": "view the top crewmates",
+        "terms": (
+            "crew",
+            "top crew",
+            "top crewmates",
+        ),
+    },
+    "memory": {
+        "command": "!c memory",
+        "description": "view the Captain's memories of you",
+        "terms": (
+            "memory",
+            "memories",
+            "my memories",
+            "what do you remember about me",
+        ),
+    },
+    "relationship": {
+        "command": "!c relationship",
+        "description": "view your relationship with the Captain",
+        "terms": (
+            "relationship",
+            "our relationship",
+            "relationship status",
+        ),
+    },
+    "birthday": {
+        "command": "!c birthday",
+        "description": "view your recorded birthday",
+        "terms": (
+            "birthday",
+            "my birthday",
+            "when is my birthday",
+        ),
+    },
+    "birthdays": {
+        "command": "!c birthdays",
+        "description": "view crew birthdays",
+        "terms": (
+            "crew birthdays",
+            "birthdays",
+            "whose birthday",
+        ),
+    },
+    "forgetme": {
+        "command": "!c forgetme",
+        "description": "remove stored memories about you",
+        "terms": (
+            "forget me",
+            "forget everything about me",
+            "delete my memories",
+            "remove my memories",
+        ),
+    },
+    "creator": {
+        "command": "!c creator",
+        "description": "view creator recognition",
+        "terms": (
+            "creator",
+            "who created you",
+            "who made you",
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # Crew work
+    # ---------------------------------------------------------
+    "jobs": {
+        "command": "!c jobs",
+        "description": "view the crew job board",
+        "terms": (
+            "jobs",
+            "job board",
+            "crew jobs",
+            "available work",
+            "what jobs are available",
+        ),
+    },
+    "work": {
+        "command": "!c work <job>",
+        "description": "take a crew shift or view your work ledger",
+        "terms": (
+            "work",
+            "crew work",
+            "take a shift",
+            "work a job",
+            "work ledger",
+            "job shift",
+        ),
+    },
 
     # ---------------------------------------------------------
     # Living Ship
@@ -173,6 +265,45 @@ COMMAND_HELP = {
             "upgrades",
             "ship upgrades",
             "improve ship",
+        ),
+    },
+    "ship_history": {
+        "command": "!c ship history",
+        "description": "view the Living Ship's recorded history",
+        "terms": (
+            "ship history",
+            "ship's history",
+            "vessel history",
+        ),
+    },
+    "ship_captures": {
+        "command": "!c ship captures",
+        "description": "view captured vessels",
+        "terms": (
+            "captured ships",
+            "captured vessels",
+            "ship captures",
+            "prize ledger",
+        ),
+    },
+    "capture_sell": {
+        "command": "!c ship capture sell <id>",
+        "description": "sell a captured vessel",
+        "terms": (
+            "sell captured ship",
+            "sell captured vessel",
+            "sell a captured vessel",
+            "sell a prize ship",
+        ),
+    },
+    "capture_salvage": {
+        "command": "!c ship capture salvage <id>",
+        "description": "salvage a captured vessel for parts",
+        "terms": (
+            "salvage captured ship",
+            "salvage captured vessel",
+            "salvage a captured vessel",
+            "salvage a prize ship",
         ),
     },
 
@@ -275,6 +406,24 @@ COMMAND_HELP = {
             "found wrecks",
         ),
     },
+    "world_locations": {
+        "command": "!c world locations",
+        "description": "view discovered world locations",
+        "terms": (
+            "world locations",
+            "discovered locations",
+            "known locations",
+        ),
+    },
+    "world_history": {
+        "command": "!c world history",
+        "description": "view Pirate World discovery history",
+        "terms": (
+            "world history",
+            "discovery history",
+            "world discoveries history",
+        ),
+    },
 
     "world_events": {
         "command": "!c world events",
@@ -301,6 +450,147 @@ COMMAND_HELP = {
             "world map",
             "show map",
             "pirate map",
+        ),
+    },
+
+    # ---------------------------------------------------------
+    # Lore, parrot, and recorded history
+    # ---------------------------------------------------------
+    "parrot": {
+        "command": "!c parrot",
+        "description": "view the parrot's status",
+        "terms": (
+            "parrot",
+            "parrot status",
+            "bird status",
+        ),
+    },
+    "parrot_talk": {
+        "command": "!c parrot talk <message>",
+        "description": "talk directly to the parrot",
+        "terms": (
+            "talk to the parrot",
+            "speak to the parrot",
+            "parrot talk",
+        ),
+    },
+    "parrot_relationship": {
+        "command": "!c parrot relationship",
+        "description": "view your relationship with the parrot",
+        "terms": (
+            "parrot relationship",
+            "relationship with the parrot",
+        ),
+    },
+    "parrot_memories": {
+        "command": "!c parrot memories",
+        "description": "view the parrot's memories of you",
+        "terms": (
+            "parrot memories",
+            "parrot memory",
+        ),
+    },
+    "parrot_jokes": {
+        "command": "!c parrot jokes",
+        "description": "view running parrot jokes",
+        "terms": (
+            "parrot jokes",
+            "running parrot jokes",
+        ),
+    },
+    "parrot_history": {
+        "command": "!c parrot history",
+        "description": "view Captain and parrot history",
+        "terms": (
+            "parrot history",
+            "captain parrot history",
+            "parrot banter history",
+        ),
+    },
+    "lore": {
+        "command": "!c lore",
+        "description": "view Captain Cutlass lore",
+        "terms": (
+            "lore",
+            "captain lore",
+            "cutlass lore",
+        ),
+    },
+    "canon": {
+        "command": "!c canon",
+        "description": "view Captain Core Canon",
+        "terms": (
+            "canon",
+            "captain canon",
+            "core canon",
+        ),
+    },
+    "serverlore": {
+        "command": "!c serverlore",
+        "description": "view server lore",
+        "terms": (
+            "server lore",
+            "our lore",
+        ),
+    },
+    "quote": {
+        "command": "!c quote",
+        "description": "hear a random Captain quote",
+        "terms": (
+            "quote",
+            "captain quote",
+            "random quote",
+        ),
+    },
+    "wisdom": {
+        "command": "!c wisdom",
+        "description": "hear pirate wisdom",
+        "terms": (
+            "wisdom",
+            "pirate wisdom",
+        ),
+    },
+    "journal": {
+        "command": "!c journal",
+        "description": "view the Captain's Journal",
+        "terms": (
+            "journal",
+            "captain's journal",
+        ),
+    },
+    "timeline": {
+        "command": "!c timeline",
+        "description": "view the ship timeline",
+        "terms": (
+            "timeline",
+            "ship timeline",
+        ),
+    },
+    "treasure_clue": {
+        "command": "!c treasure clue",
+        "description": "view the current treasure clue",
+        "terms": (
+            "treasure clue",
+            "current clue",
+            "clue",
+        ),
+    },
+    "savequote": {
+        "command": "!c savequote",
+        "description": "save a Captain quote from a replied message",
+        "terms": (
+            "save a quote",
+            "save quote",
+            "remember this quote",
+        ),
+    },
+    "chronicle": {
+        "command": "!c chronicle latest",
+        "description": "view the latest weekly chronicle",
+        "terms": (
+            "chronicle",
+            "latest chronicle",
+            "weekly chronicle",
         ),
     },
 
@@ -473,6 +763,9 @@ HELP_INTENT_PRIORITY = {
     "island_explore": 400,
     "destinations": 400,
     "voyage": 400,
+    "jobs": 400,
+    "work": 400,
+    "savequote": 400,
 
     # Explicit generic combat action.
     "attack": 300,
@@ -533,6 +826,21 @@ HELP_ACTION_INTENTS = (
     ("start a voyage", "voyage"),
     ("start voyage", "voyage"),
     ("set sail", "voyage"),
+
+    # Crew work actions.
+    ("job board", "jobs"),
+    ("crew jobs", "jobs"),
+    ("available work", "jobs"),
+    ("crew work", "work"),
+    ("take a shift", "work"),
+    ("take a crew shift", "work"),
+    ("work a job", "work"),
+
+    # Explicit quote action.
+    ("save a quote", "savequote"),
+    ("save quote", "savequote"),
+    ("saves a quote", "savequote"),
+    ("saving a quote", "savequote"),
 
     # Explicit tactical actions.
     ("boarding", "board"),

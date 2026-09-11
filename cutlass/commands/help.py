@@ -113,7 +113,13 @@ async def handle_help_command(
             "`!cutlass jobs` — Crew job board\n"
             "`!cutlass work` — View your work ledger\n"
             "`!cutlass work <job>` — Take a crew shift\n"
-            "`!cutlass work patch the hull` — Help repair the ship during recovery\n"
+            "`!cutlass work patch the hull` — Repair the ship during recovery\n"
+            "`!cutlass work salvage lumber` — Salvage repair timber\n"
+            "`!cutlass work dockyard assistance` — Help the dockyard\n"
+            "`!cutlass work clear the bilge` — Clear the bilge\n"
+            "`!cutlass work help the shipwright` — Assist the shipwright\n"
+            "`!cutlass work scavenge repair materials` — Find repair supplies\n"
+            "`!cutlass work emergency repairs` — Repair a ship at 0 hull\n"
             "`!cutlass stats` — Your statistics\n"
             "`!cutlass birthday` — View your birthday\n"
             "`!cutlass birthday set <month> <day>` — Set birthday\n"
@@ -190,11 +196,13 @@ async def handle_help_command(
             name="Crew Commands",
             value=(
                 "`!cutlass parrot` — Status\n"
+                "`!cutlass parrot status` — Status alias\n"
                 "`!cutlass parrot talk <message>` — Talk directly\n"
                 "`!cutlass parrot relationship` — Your relationship\n"
                 "`!cutlass parrot memories` — Memories of you\n"
                 "`!cutlass parrot jokes` — Running jokes\n"
                 "`!cutlass parrot history` — Captain/parrot history\n"
+                "`!cutlass parrot banter` — History alias\n"
                 "`!cutlass parrot mood` — Current mood"
             ),
             inline=False
@@ -249,12 +257,19 @@ async def handle_help_command(
             name="Ship Commands",
             value=(
                 "`!c ship` — Status, hull, recovery, and level\n"
+                "`!c ship world` — Ship status alias\n"
+                "`!c ship status` — Ship status alias\n"
+                "`!c ship name <name>` — Rename the Living Ship\n"
                 "`!c ship history` — Recorded ship history\n"
                 "`!c ship treasury` — Treasury\n"
                 "`!c ship donate <amount>` — Donate Doubloons\n"
                 "`!c ship repair` — Repair the ship\n"
                 "`!c ship upgrades` — View upgrades\n"
-                "`!c ship upgrade <name>` — Purchase an upgrade"
+                "`!c ship upgrade <name>` — Purchase an upgrade\n"
+                "`!c ship captures` — View captured vessels\n"
+                "`!c ship capture` — Capture help\n"
+                "`!c ship capture sell <id>` — Sell a captured vessel\n"
+                "`!c ship capture salvage <id>` — Salvage a captured vessel"
             ),
             inline=False
         )
@@ -295,7 +310,13 @@ async def handle_help_command(
                 "`!c jobs` — Crew job board\n"
                 "`!c work` — Your work ledger\n"
                 "`!c work <job>` — Take a crew shift\n"
-                "`!c work patch the hull` — Repair the Living Ship during recovery"
+                "`!c work patch the hull` — Repair during recovery\n"
+                "`!c work salvage lumber` — Salvage repair timber\n"
+                "`!c work dockyard assistance` — Help the dockyard\n"
+                "`!c work clear the bilge` — Clear the bilge\n"
+                "`!c work help the shipwright` — Assist the shipwright\n"
+                "`!c work scavenge repair materials` — Find repair supplies\n"
+                "`!c work emergency repairs` — Repair a ship at 0 hull"
             ),
             inline=False
         )
@@ -337,6 +358,8 @@ async def handle_help_command(
                 "`!c world` — Pirate World status\n"
                 "`!c world map` — Discovered regions and islands\n"
                 "`!c world locations` — Discovered locations\n"
+                "`!c world discoveries` — Discovered locations alias\n"
+                "`!c world findings` — Unique world findings\n"
                 "`!c world history` — World discovery history\n"
                 "`!c world events` — Active Living World Event\n"
                 "`!c explore` — Scout surrounding waters\n\n"
@@ -394,7 +417,8 @@ async def handle_help_command(
             value=(
                 "`!c battle` — Current naval battle\n"
                 "`!c monster` — Current sea monster encounter\n"
-                "`!c boss` — Current legendary boss encounter"
+                "`!c boss` — Current legendary boss encounter\n\n"
+                "Legacy: `!c battle start`, `!c battle attack`, `!c battle defend`, `!c battle board`, `!c battle flee`, `!c monster start [key]`, `!c monster attack`, `!c boss attack`, `!c boss defend`"
             ),
             inline=False
         )
@@ -482,7 +506,10 @@ async def handle_help_command(
                 "`!cutlass ship channel #channel`\n"
                 "`!cutlass ship on/off`\n"
                 "`!cutlass ship status`\n"
-                "`!cutlass ship name <name>`"
+                "`!cutlass ship name <name>`\n"
+                "`!cutlass ship captures`\n"
+                "`!cutlass ship capture sell <id>`\n"
+                "`!cutlass ship capture salvage <id>`"
             ),
             inline=False
         )
@@ -493,6 +520,7 @@ async def handle_help_command(
                 "`!cutlass quiet on/off`\n"
                 "`!cutlass mood <mood>`\n"
                 "`!cutlass event on/off`\n"
+                "`!cutlass ai` / `!cutlass ai status`\n"
                 "`!cutlass treasure start ANSWER | CLUE`"
             ),
             inline=False
@@ -520,16 +548,30 @@ async def handle_help_command(
 
         pages = [
             (
+                "**Help & Shortcuts**\n"
+                "`!c help` / `!c commands`\n"
+                "`!c help crew/fun/parrot/ship/world/admin`\n"
+                "`!c help all`\n"
+                "Shortcuts: `!c repair`, `!c upgrades`, `!c history`,\n"
+                "`!c treasury`, `!c destinations`"
+            ),
+            (
                 "**Crew & Profiles**\n"
                 "`!c profile`\n"
                 "`!c memory`\n"
                 "`!c relationship`\n"
+                "`!c creator`\n"
                 "`!c balance`\n"
                 "`!c achievements`\n"
                 "`!c leaderboard`\n"
                 "`!c crew`\n"
+                "`!c jobs`\n"
+                "`!c work`\n"
+                "`!c work <job>`\n"
                 "`!c stats`\n"
                 "`!c birthday`\n"
+                "`!c birthday set <month> <day>`\n"
+                "`!c birthday clear`\n"
                 "`!c birthdays`\n"
                 "`!c forgetme`"
             ),
@@ -542,19 +584,23 @@ async def handle_help_command(
                 "`!c wisdom`\n"
                 "`!c journal`\n"
                 "`!c timeline`\n"
+                "`!c savequote`\n"
                 "`!c story`\n"
                 "`!c punbattle`\n"
+                "`!c treasure clue`\n"
                 "`!c chronicle latest`\n"
                 "`!c mood`"
             ),
             (
                 "**Parrot**\n"
                 "`!c parrot`\n"
+                "`!c parrot status`\n"
                 "`!c parrot talk <message>`\n"
                 "`!c parrot relationship`\n"
                 "`!c parrot memories`\n"
                 "`!c parrot jokes`\n"
                 "`!c parrot history`\n"
+                "`!c parrot banter`\n"
                 "`!c parrot mood`"
             ),
             (
@@ -562,6 +608,8 @@ async def handle_help_command(
                 "`!c world`\n"
                 "`!c world map`\n"
                 "`!c world locations`\n"
+                "`!c world discoveries`\n"
+                "`!c world findings`\n"
                 "`!c world history`\n"
                 "`!c world events`\n"
                 "`!c explore` — Scout surrounding waters\n"
@@ -578,23 +626,53 @@ async def handle_help_command(
                 "`!c ability <name>` — Activate ability\n"
                 "`!c battle` — Naval battle status\n"
                 "`!c monster` — Monster status\n"
-                "`!c boss` — Boss status"
+                "`!c boss` — Boss status\n"
+                "`!c monsters` — Monster status alias\n"
+                "`!c battle start/attack/defend/board/flee`\n"
+                "`!c monster start [key]/attack`\n"
+                "`!c boss attack/defend`"
             ),
             (
-                "**Living Ship & Voyages**\n"
+                "**Living Ship**\n"
                 "`!c ship`\n"
+                "`!c ship world`\n"
+                "`!c ship status`\n"
+                "`!c ship name <name>`\n"
                 "`!c ship history`\n"
                 "`!c ship treasury`\n"
                 "`!c ship donate <amount>`\n"
                 "`!c ship repair`\n"
                 "`!c ship upgrades`\n"
                 "`!c ship upgrade <name>`\n"
+                "`!c ship captures`\n"
+                "`!c ship capture` — Capture help\n"
+                "`!c ship capture sell <id>`\n"
+                "`!c ship capture salvage <id>`"
+            ),
+            (
+                "**Crew Work & Voyages**\n"
                 "`!c jobs`\n"
                 "`!c work`\n"
                 "`!c work <job>`\n"
                 "`!c voyage`\n"
+                "`!c voyage destinations`\n"
                 "`!c voyage status`\n"
                 "`!c voyage start <number>`"
+            ),
+            (
+                "**Admiralty**\n"
+                "`!c help admin`\n"
+                "`!c welcome status/channel/on/off`\n"
+                "`!c testwelcome`\n"
+                "`!c returners status/on/off/days <days>`\n"
+                "`!c log status/channel/on/off`\n"
+                "`!c chronicle now`\n"
+                "`!c ship channel/on/off/status`\n"
+                "`!c quiet on/off`\n"
+                "`!c mood <mood>`\n"
+                "`!c event on/off`\n"
+                "`!c ai` / `!c ai status`\n"
+                "`!c treasure start ANSWER | CLUE`"
             )
         ]
 
