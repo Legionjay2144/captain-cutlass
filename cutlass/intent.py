@@ -245,6 +245,7 @@ def is_member_profile_request(message, bot_user_id=None):
     """
 
     content = message.content.strip()
+    lowered = content.lower()
 
     if bot_user_id is not None:
         content = re.sub(
@@ -252,6 +253,24 @@ def is_member_profile_request(message, bot_user_id=None):
             "",
             content
         ).strip()
+        lowered = content.lower()
+
+    gameplay_subject_pattern = (
+        r"\b(?:about|of)\s+(?:the\s+|our\s+|this\s+)?"
+        r"(?:"
+        r"voyage|voyages|ship|living\s+ship|hull|battle|battles|"
+        r"fight|combat|monster|monsters|boss|bosses|island|islands|"
+        r"world|world\s+history|history|jobs|job|crew\s+work|"
+        r"commands?|doubloons?|treasury|treasure|exploration"
+        r")\b"
+    )
+
+    if re.search(
+        gameplay_subject_pattern,
+        lowered,
+        flags=re.IGNORECASE
+    ):
+        return False
 
     patterns = (
         r"\bwhat\s+do\s+you\s+think\s+(?:about|of)\b",
