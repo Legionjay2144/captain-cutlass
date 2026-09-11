@@ -2834,8 +2834,15 @@ def normalize_creator_address_reply(
     )
 
     reply = re.sub(
-        rf"\b{re.escape(CREATOR_NAME)}\s*,\s*{re.escape(CREATOR_NAME)}\b",
+        rf"\b{re.escape(CREATOR_NAME)}(?:\s*,\s*{re.escape(CREATOR_NAME)})+\b",
         CREATOR_NAME,
+        reply,
+        flags=re.IGNORECASE,
+    )
+
+    reply = re.sub(
+        rf"^({re.escape(CREATOR_NAME)})(?:\s*,\s*)+(?=with\b|ye\b|you\b|yer\b|your\b)",
+        CREATOR_NAME + ", ",
         reply,
         flags=re.IGNORECASE,
     )
