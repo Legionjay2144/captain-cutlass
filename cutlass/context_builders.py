@@ -220,7 +220,13 @@ CREATOR_DEV_TERMS = (
     "dockerize",
     "dockerized",
     "docker container",
+    "container",
     "containers",
+    "deployment",
+    "deploy",
+    "deployed",
+    "hosting",
+    "infrastructure",
     "server rack",
     "homelab",
     "home lab",
@@ -256,7 +262,7 @@ def creator_profile_is_relevant(
     Decide whether Captain needs Jay's full creator profile.
 
     Jay's creator status is always true, but the large profile contains
-    strong Docker/development running jokes. Loading it for every ordinary
+    strong creator/development running jokes. Loading it for every ordinary
     message makes those callbacks leak into gameplay and casual chat, so
     only include it when the latest message is actually about Jay, the
     creator relationship, or Captain's development.
