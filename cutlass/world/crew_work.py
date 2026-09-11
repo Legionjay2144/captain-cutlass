@@ -24,7 +24,6 @@ from ship_world import (
     add_ship_supplies,
     add_ship_treasury,
     count_captured_ships,
-    discord_timestamp,
     get_ship,
     get_ship_operational_status,
     get_upgrade_levels,
@@ -72,9 +71,11 @@ GENERAL_JOBS = {
             "dockhand",
             "dockhands",
             "dockside",
+            "dockside hand",
             "dockside hands",
             "dock work",
             "harbor hand",
+            "harbor hands",
         },
         "description": "Haul crates, scrub tar, and keep the harbor crew moving.",
         "risk": "Low",
@@ -672,7 +673,7 @@ async def _cooldown_reason(guild_id, user_id, job_key):
 
     available_at = _parse_timestamp(state["available_at"])
     if available_at and available_at > _now():
-        return "That job is on cooldown. Ready at " + discord_timestamp(_ts(available_at)) + "."
+        return "That job is on cooldown. " + _format_ready_remaining(available_at) + "."
 
     return None
 
@@ -919,6 +920,28 @@ def _format_duration(minutes):
     if rem:
         return f"{hours}h {rem}m"
     return f"{hours}h"
+
+
+def _format_ready_remaining(available_at):
+    if not available_at:
+        return "Ready now"
+
+    remaining_seconds = int(
+        (
+            available_at
+            - _now()
+        ).total_seconds()
+    )
+
+    if remaining_seconds <= 0:
+        return "Ready now"
+
+    minutes = max(
+        1,
+        (remaining_seconds + 59) // 60
+    )
+
+    return "Ready in about " + _format_duration(minutes)
 
 
 def _format_recovery_eta(remaining):
@@ -1281,7 +1304,7 @@ async def format_work_summary(guild_id, user_id):
                 available_at = None
 
             if available_at and available_at > _now():
-                ready_text = "Ready at " + discord_timestamp(_ts(available_at))
+                ready_text = _format_ready_remaining(available_at)
             else:
                 ready_text = "Ready now"
 

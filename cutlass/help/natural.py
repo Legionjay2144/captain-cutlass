@@ -259,11 +259,18 @@ COMMAND_HELP = {
     },
     "upgrades": {
         "command": "!c upgrades",
-        "description": "view Living Ship upgrades",
+        "description": "view Living Ship upgrades and treasury costs",
         "terms": (
             "upgrade",
             "upgrades",
             "ship upgrades",
+            "living ship upgrades",
+            "upgrade living ship",
+            "upgrade the living ship",
+            "upgrade the ship",
+            "level 2 upgrade",
+            "upgrade to level 2",
+            "upgrade materials",
             "improve ship",
         ),
     },
@@ -827,6 +834,15 @@ HELP_ACTION_INTENTS = (
     ("start voyage", "voyage"),
     ("set sail", "voyage"),
 
+    # Ship progression actions.
+    ("upgrade living ship", "upgrades"),
+    ("upgrade the living ship", "upgrades"),
+    ("upgrade the ship", "upgrades"),
+    ("ship upgrades", "upgrades"),
+    ("upgrade materials", "upgrades"),
+    ("level 2 upgrade", "upgrades"),
+    ("upgrade to level 2", "upgrades"),
+
     # Crew work actions.
     ("job board", "jobs"),
     ("crew jobs", "jobs"),
@@ -944,6 +960,7 @@ def _looks_like_help_request(text):
     patterns = (
         r"\bhow\s+(?:do|can|would|should)\s+i\b",
         r"\bhow\s+(?:do|can|would|should)\s+we\b",
+        r"\bhow\s+(?:do|can|would|should)\s+you\b",
         r"\bwhat\s+command\b",
         r"\bwhich\s+command\b",
         r"\bwhat\s+do\s+i\s+type\b",
@@ -961,6 +978,8 @@ def _looks_like_help_request(text):
         r"\bwhat\s+is\s+our\s+ship\s+history\b",
         r"\bwhere\s+can\s+(?:i|we)\b",
         r"\bwhat\s+.+\s+are\s+available\b",
+        r"\bwhat\s+(?:materials?|resources?)\b",
+        r"\bwhat\s+(?:materials?|resources?)\s+do\s+(?:i|we)\s+need\b",
         r"\bshow\s+(?:me\s+)?(?:the\s+)?",
         r"\blist\s+(?:the\s+)?",
         r"\bhow\s+do\s+i\s+get\b",
@@ -989,6 +1008,10 @@ FOLLOWUP_HELP_PATTERNS = (
     "how do i use that",
     "how do we use that",
     "what about that",
+    "what materials",
+    "what materials do i need",
+    "what resources",
+    "what resources do i need",
 )
 
 
