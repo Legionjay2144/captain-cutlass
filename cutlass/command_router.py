@@ -2,6 +2,7 @@
 
 SHORT_COMMAND_ALIASES = {
     "!cutlass repair": "!cutlass ship repair",
+    "!cutlass repair ship": "!cutlass ship repair",
     "!cutlass upgrades": "!cutlass ship upgrades",
     "!cutlass history": "!cutlass ship history",
     "!cutlass treasury": "!cutlass ship treasury",

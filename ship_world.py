@@ -3482,7 +3482,7 @@ async def format_destinations(guild_id):
 
     lines.extend([
         "",
-        "Use `!c voyage <number>` to set sail.",
+        "Use `!c voyage start <number>` to set sail.",
         "Use `!c explore` to scout for new islands.",
     ])
 

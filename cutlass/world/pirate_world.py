@@ -2898,18 +2898,18 @@ async def format_world(
     }
 
     return (
-        "**PIRATE WORLD**\\n"
+        "**PIRATE WORLD**\n"
         "Known Regions: **"
         + str(len(REGIONS))
-        + "**\\n"
+        + "**\n"
         "Known Islands: **"
         + str(len(visible_island_keys))
-        + "**\\n"
+        + "**\n"
         "Crew Discoveries: **"
         + str(len(visible_discoveries))
         + "/"
         + str(len(visible_island_keys))
-        + "**\\n\\n"
+        + "**\n\n"
         "Use `!cutlass world map` to view the seas."
     )
 
@@ -2933,7 +2933,7 @@ async def format_world_map(
     for region_key, region in REGIONS.items():
 
         lines.append(
-            "\\n**"
+            "\n**"
             + region["name"]
             + "**"
             + " — "
@@ -2974,7 +2974,7 @@ async def format_world_map(
                 )
             )
 
-    return "\\n".join(lines)[:1900]
+    return "\n".join(lines)[:1900]
 
 async def format_discoveries(
     guild_id

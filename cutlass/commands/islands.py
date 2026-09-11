@@ -130,6 +130,37 @@ async def handle_island_command(
         )
         return True
 
+    if command.startswith("!cutlass island "):
+
+        island_name = command.removeprefix(
+            "!cutlass island "
+        ).strip()
+
+        if island_name == "explore":
+            pass
+        else:
+            island_key = resolve_island_key(
+                island_name
+            )
+
+            text = format_island(
+                island_key
+            )
+
+            if text is None:
+                await message.reply(
+                    "Unknown island. Use `!cutlass world locations` "
+                    "to see known islands.",
+                    mention_author=False
+                )
+                return True
+
+            await message.reply(
+                text,
+                mention_author=False
+            )
+            return True
+
     if command == "!cutlass island explore":
 
         async with get_guild_lock(message.guild.id):
