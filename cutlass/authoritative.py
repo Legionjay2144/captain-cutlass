@@ -8,6 +8,7 @@ from cutlass.context_builders import (
 )
 from memory import get_captain_lore, get_recent_messages, get_server_lore
 from ship_world import get_completed_voyages, get_history_records
+from cutlass.world.pirate_world import format_discoveries
 
 
 async def build_world_context(
@@ -89,6 +90,68 @@ async def resolve_authoritative_question(message, current_ship, canon_rows):
         if not voyages:
             return "I don't have a completed voyage recorded yet, matey."
         return "Our latest recorded voyage: " + str(voyages[0]["content"])
+
+    discovery_patterns = (
+        "what discoveries have we made",
+        "what have we discovered",
+        "show discoveries",
+        "our discoveries",
+        "world discoveries",
+        "discovered islands",
+        "known discoveries",
+    )
+    if any(phrase in content for phrase in discovery_patterns):
+        return await format_discoveries(message.guild.id)
+
+    damaged_ship_patterns = (
+        "what do i do if the ship is damaged",
+        "what do we do if the ship is damaged",
+        "ship is damaged",
+        "ship gets damaged",
+        "fix the ship",
+        "repair the ship",
+        "repair our ship",
+        "damaged hull",
+    )
+    if any(phrase in content for phrase in damaged_ship_patterns):
+        return (
+            "If the Living Ship is damaged, use `!c repair` for a paid full repair. "
+            "Use `!c ship` to check hull and `!c jobs` for maintenance work when the ship is recovering."
+        )
+
+    reward_followup_patterns = (
+        "did anyone earn anything from it",
+        "did anyone earn anything",
+        "what did we earn from it",
+        "what did we get from it",
+        "what was the reward",
+        "what rewards did we get",
+    )
+    if any(phrase in content for phrase in reward_followup_patterns):
+        recent = await get_recent_messages(message.guild.id, message.channel.id, 8)
+        recent_topic = None
+        for row in reversed(recent):
+            recent_topic = classify_history_topic(row[1])
+            if recent_topic:
+                break
+
+        if recent_topic == "voyage":
+            voyages = await get_completed_voyages(message.guild.id, limit=1)
+            if voyages:
+                return "The latest recorded voyage reward entry: " + str(voyages[0]["content"])
+
+        if recent_topic in HISTORY_TOPIC_RULES:
+            records = await get_history_records(message.guild.id, limit=20)
+            topic_records = _history_records_for_topic(records, recent_topic)
+            if topic_records:
+                return (
+                    "The latest recorded "
+                    + HISTORY_TOPIC_RULES[recent_topic]["label"]
+                    + " entry: "
+                    + str(topic_records[0]["content"])
+                )
+
+        return "I don't have a recorded reward for that recent topic, matey."
 
     history_followup_patterns = (
         "one before that",

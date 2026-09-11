@@ -2815,10 +2815,38 @@ def normalize_creator_address_reply(
     if not reply:
         return reply
 
+    reply = re.sub(
+        r"[\s\u201d\u2019\"',]+$",
+        "",
+        reply.strip()
+    )
+
     if not is_creator(
         message.author.id
     ):
         return reply
+
+    reply = re.sub(
+        r"\bDart\b",
+        CREATOR_NAME,
+        reply,
+        flags=re.IGNORECASE,
+    )
+
+    reply = re.sub(
+        rf"\b{re.escape(CREATOR_NAME)}\s*,\s*{re.escape(CREATOR_NAME)}\b",
+        CREATOR_NAME,
+        reply,
+        flags=re.IGNORECASE,
+    )
+
+    reply = re.sub(
+        rf"\b{re.escape(CREATOR_NAME)}\s*,\s*(?:matey|mate|shipwright)\s*,\s*",
+        CREATOR_NAME + ", ",
+        reply,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
     allowed = {
         CREATOR_NAME.casefold(),

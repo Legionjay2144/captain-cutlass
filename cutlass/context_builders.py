@@ -173,6 +173,16 @@ def is_creator(user_id, creator_user_id):
     return creator_user_id != 0 and user_id == creator_user_id
 
 
+CREATOR_CONTEXT_CONTAMINATION_TERMS = (
+    "dart",
+)
+
+
+def creator_context_is_contaminated(text):
+    lowered = str(text or "").lower()
+    return any(term in lowered for term in CREATOR_CONTEXT_CONTAMINATION_TERMS)
+
+
 CREATOR_PROFILE_REQUEST_TERMS = (
     "about me",
     "know about me",
@@ -445,6 +455,17 @@ async def resolve_joke_target(message, bot_user_id):
 
     content = message.content.strip()
 
+    if re.search(
+        r"\b(?:roast|tease|make\s+fun\s+of)\s+(?:me|myself)\b",
+        content,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:joke|roast|tease)\s+about\s+(?:me|myself)\b",
+        content,
+        flags=re.IGNORECASE,
+    ):
+        return message.author
+
     # Remove Captain's own Discord mention before trying
     # to interpret ordinary member-target phrasing.
     if bot_user_id is not None:
@@ -605,16 +626,31 @@ async def build_member_context(
         )
 
     if memories:
-        lines.append("Strong memories:")
-        for memory in memories:
-            lines.append("- " + memory[:250])
+        safe_memories = [
+            memory
+            for memory in memories
+            if not (
+                author_is_creator
+                and creator_context_is_contaminated(memory)
+            )
+        ]
+        if safe_memories:
+            lines.append("Strong memories:")
+            for memory in safe_memories:
+                lines.append("- " + memory[:250])
 
     if relationship:
         lines.append("Relationship: " + relationship["relationship_type"])
         lines.append("Familiarity: " + str(relationship["familiarity"]) + "/100")
 
         if relationship["nickname"]:
-            lines.append("Nickname: " + relationship["nickname"][:100])
+            if author_is_creator:
+                if not creator_context_is_contaminated(relationship["nickname"]):
+                    lines.append(
+                        "Creator nickname note: stored nicknames must not override the canonical name Jay."
+                    )
+            else:
+                lines.append("Nickname: " + relationship["nickname"][:100])
 
         if relationship["opinion"]:
             lines.append("Opinion: " + relationship["opinion"][:250])
@@ -723,15 +759,30 @@ async def build_target_member_context(
         lines.append("Familiarity: " + str(relationship["familiarity"]) + "/100")
 
         if relationship["nickname"]:
-            lines.append("Nickname: " + relationship["nickname"][:100])
+            if target_is_creator:
+                if not creator_context_is_contaminated(relationship["nickname"]):
+                    lines.append(
+                        "Target creator nickname note: stored nicknames must not override the canonical name Jay."
+                    )
+            else:
+                lines.append("Nickname: " + relationship["nickname"][:100])
 
         if relationship["opinion"]:
             lines.append("Captain opinion: " + relationship["opinion"][:300])
 
     if memories:
-        lines.append("Harmless memories:")
-        for memory in memories:
-            lines.append("- " + memory[:250])
+        safe_memories = [
+            memory
+            for memory in memories
+            if not (
+                target_is_creator
+                and creator_context_is_contaminated(memory)
+            )
+        ]
+        if safe_memories:
+            lines.append("Harmless memories:")
+            for memory in safe_memories:
+                lines.append("- " + memory[:250])
 
     if jokes:
         lines.append("Running jokes:")

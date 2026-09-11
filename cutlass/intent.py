@@ -28,6 +28,11 @@ def detect_direct_question_mode(message):
         r"\bwhy are you\b",
         r"\bhow are you\b",
         r"\bhow would you\b",
+        r"\btell me about\b",
+        r"\bwhat happened after that\b",
+        r"\bdid anyone earn\b",
+        r"\bwhat did we earn\b",
+        r"\bwhat discoveries have we made\b",
         r"\breckon you\b",
     ]
 
