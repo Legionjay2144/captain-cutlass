@@ -2,7 +2,7 @@ async def handle_boss_command(
     message,
     command,
     *,
-    cached_settings,
+    get_ship_settings,
     get_ship,
     get_active_battle,
     get_active_monster,
@@ -21,7 +21,7 @@ async def handle_boss_command(
     ):
         return False
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         message.guild.id
     )
 

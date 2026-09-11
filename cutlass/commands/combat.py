@@ -159,7 +159,7 @@ async def handle_combat_command(
     message,
     command,
     *,
-    cached_settings,
+    get_ship_settings,
     get_ship,
     get_ship_operational_status,
     get_active_battle,
@@ -243,7 +243,7 @@ async def handle_combat_command(
     # Ship World availability
     # ---------------------------------------------------------
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         guild_id
     )
 

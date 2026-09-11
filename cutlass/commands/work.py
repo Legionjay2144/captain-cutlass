@@ -5,6 +5,39 @@ from cutlass.world.crew_work import (
 )
 
 
+def _discord_chunks(text, limit=1900):
+    chunks = []
+    current = []
+    current_length = 0
+
+    for line in str(text or "").splitlines():
+        line_length = len(line) + 1
+
+        if current and current_length + line_length > limit:
+            chunks.append("\n".join(current))
+            current = []
+            current_length = 0
+
+        if len(line) >= limit:
+            if current:
+                chunks.append("\n".join(current))
+                current = []
+                current_length = 0
+            chunks.extend(
+                line[index:index + limit]
+                for index in range(0, len(line), limit)
+            )
+            continue
+
+        current.append(line)
+        current_length += line_length
+
+    if current:
+        chunks.append("\n".join(current))
+
+    return chunks or [""]
+
+
 async def handle_work_command(
     message,
     content,
@@ -32,26 +65,25 @@ async def handle_work_command(
         "!cutlass jobs",
         "!cutlass crew jobs",
     }:
-        await message.reply(
-            await format_jobs_board(
-                message.guild.id,
-                message.author.id,
-            ),
-            mention_author=False,
+        jobs_text = await format_jobs_board(
+            message.guild.id,
+            message.author.id,
         )
+        chunks = _discord_chunks(jobs_text)
+        await message.reply(chunks[0], mention_author=False)
+        for chunk in chunks[1:]:
+            await message.channel.send(chunk)
         return True
 
     if normalized in {
         "!cutlass work",
         "!cutlass crew work",
     }:
-        await message.reply(
-            await format_work_summary(
-                message.guild.id,
-                message.author.id,
-            ),
-            mention_author=False,
+        summary_text = await format_work_summary(
+            message.guild.id,
+            message.author.id,
         )
+        await message.reply(summary_text[:1900], mention_author=False)
         return True
 
     raw_job = ""

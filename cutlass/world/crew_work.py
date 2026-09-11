@@ -17,6 +17,8 @@ from memory import (
     get_doubloons,
 )
 from ship_world import (
+    PASSIVE_RECOVERY_HULL_PER_INTERVAL,
+    PASSIVE_RECOVERY_INTERVAL_SECONDS,
     _apply_passive_recovery_unlocked,
     add_history,
     add_ship_supplies,
@@ -919,6 +921,55 @@ def _format_duration(minutes):
     return f"{hours}h"
 
 
+def _format_recovery_eta(remaining):
+    remaining = max(0, int(remaining))
+    if remaining <= 0:
+        return "Operational"
+
+    intervals = (
+        remaining + PASSIVE_RECOVERY_HULL_PER_INTERVAL - 1
+    ) // PASSIVE_RECOVERY_HULL_PER_INTERVAL
+    seconds = intervals * PASSIVE_RECOVERY_INTERVAL_SECONDS
+    hours, remainder = divmod(seconds, 3600)
+    minutes = remainder // 60
+
+    if hours and minutes:
+        return str(hours) + "h " + str(minutes) + "m"
+    if hours:
+        return str(hours) + "h"
+    return str(minutes) + "m"
+
+
+def _recovery_display_lines(repair_snapshot):
+    if not repair_snapshot or repair_snapshot["operational"]["operational"]:
+        return []
+
+    ship = repair_snapshot["ship"]
+    operational = repair_snapshot["operational"]
+
+    return [
+        "Hull: **"
+        + str(int(ship["hull"]))
+        + "/"
+        + str(int(operational["max_hull"]))
+        + "**",
+        "Operational threshold: **"
+        + str(int(operational["threshold"]))
+        + " hull**",
+        "Crew progress this recovery: **+"
+        + str(int(repair_snapshot["cycle_hull_restored"]))
+        + " hull**",
+        "Passive recovery rate: **+"
+        + str(PASSIVE_RECOVERY_HULL_PER_INTERVAL)
+        + " hull every "
+        + str(PASSIVE_RECOVERY_INTERVAL_SECONDS // 60)
+        + " minutes**",
+        "Passive recovery ETA: **"
+        + _format_recovery_eta(operational["needed"])
+        + "**",
+    ]
+
+
 def _format_bonus(bonus_type, bonus_value):
     if not bonus_type or bonus_value <= 0:
         return ""
@@ -1088,6 +1139,10 @@ async def format_jobs_board(guild_id, user_id):
             ]
         )
 
+    recovery_lines = _recovery_display_lines(repair_snapshot)
+    if recovery_lines:
+        lines.extend(["", *recovery_lines])
+
     for job_key in JOB_ORDER:
         job = JOB_DEFINITIONS[job_key]
         reason = _job_unlock_reason(job, context)
@@ -1207,6 +1262,10 @@ async def format_work_summary(guild_id, user_id):
                     + str(row["hull_restored"])
                     + " hull**"
                 )
+
+    recovery_lines = _recovery_display_lines(repair_snapshot)
+    if recovery_lines:
+        lines.extend(["", *recovery_lines])
 
     stats = await get_work_stats(guild_id, user_id)
 

@@ -7,7 +7,7 @@ async def handle_exploration_command(
     message,
     command,
     *,
-    cached_settings,
+    get_ship_settings,
     award_achievement,
     get_ship,
     get_ship_operational_status,
@@ -35,7 +35,7 @@ async def handle_exploration_command(
     ):
         return False
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         message.guild.id
     )
 
@@ -140,6 +140,7 @@ async def handle_exploration_command(
         )
 
         unlocked_achievements = []
+        finding_discovered = False
 
         async def unlock_achievement(name, description):
             success = await award_achievement(
@@ -645,9 +646,6 @@ async def handle_exploration_command(
         # ---------------------------------------------------------
 
         else:
-
-            finding_discovered = False
-
             # -------------------------------------------------
             # Unique world finding roll
             #

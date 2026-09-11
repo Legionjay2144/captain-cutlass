@@ -3,6 +3,8 @@ services:
     image: ollama/ollama:latest
     container_name: captain-cutlass-ollama
     restart: unless-stopped
+    profiles:
+      - local-ai
     ports:
       - "11434:11434"
     volumes:
@@ -16,8 +18,6 @@ services:
     container_name: captain-cutlass
     init: true
     restart: unless-stopped
-    depends_on:
-      - ollama
 
     env_file:
       - .env
@@ -25,15 +25,9 @@ services:
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
-      AI_PROVIDER: ${AI_PROVIDER:-local-first}
-      AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-openai}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-none}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
-      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-llama3.2}
-      LOCAL_AI_BASE_URL: ${LOCAL_AI_BASE_URL:-http://ollama:11434/v1}
-      LOCAL_AI_API_KEY: ${LOCAL_AI_API_KEY:-ollama}
-      LOCAL_AI_MAX_OUTPUT_TOKENS: ${LOCAL_AI_MAX_OUTPUT_TOKENS:-}
-      LOCAL_AI_CONTEXT_TOKENS: ${LOCAL_AI_CONTEXT_TOKENS:-}
-      LOCAL_AI_TEMPERATURE: ${LOCAL_AI_TEMPERATURE:-0.7}
 
     volumes:
       - ./data:/app/data

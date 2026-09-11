@@ -3,7 +3,7 @@ async def handle_monster_command(
     command,
     *,
     is_admin,
-    cached_settings,
+    get_ship_settings,
     get_ship,
     start_monster_encounter,
     get_active_battle,
@@ -20,7 +20,7 @@ async def handle_monster_command(
     ):
         return False
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         message.guild.id
     )
 

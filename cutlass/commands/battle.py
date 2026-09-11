@@ -3,7 +3,7 @@ async def handle_battle_command(
     command,
     *,
     is_admin,
-    cached_settings,
+    get_ship_settings,
     get_ship,
     get_ship_operational_status,
     start_naval_battle,
@@ -26,7 +26,7 @@ async def handle_battle_command(
     ):
         return False
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         message.guild.id
     )
 

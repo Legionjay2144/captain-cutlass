@@ -62,12 +62,10 @@ def _normalize_provider_mode(provider, fallback_provider):
             fallback_provider = "openai"
 
     elif provider == "local":
-        if fallback_provider == "none":
-            fallback_provider = "openai"
+        pass
 
     elif provider == "openai":
-        if fallback_provider == "none":
-            fallback_provider = "local"
+        pass
 
     elif provider not in {"openai", "local"}:
         provider = "openai"

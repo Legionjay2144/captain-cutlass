@@ -8,7 +8,7 @@ async def handle_island_command(
     message,
     command,
     *,
-    cached_settings,
+    get_ship_settings,
     get_ship,
     get_ship_operational_status,
     get_active_battle,
@@ -35,7 +35,7 @@ async def handle_island_command(
     if not command.startswith("!cutlass island"):
         return False
 
-    settings = await cached_settings(
+    settings = await get_ship_settings(
         message.guild.id
     )
 
