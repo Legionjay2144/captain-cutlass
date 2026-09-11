@@ -173,6 +173,133 @@ def is_creator(user_id, creator_user_id):
     return creator_user_id != 0 and user_id == creator_user_id
 
 
+CREATOR_PROFILE_REQUEST_TERMS = (
+    "about me",
+    "know about me",
+    "remember about me",
+    "remember me",
+    "my profile",
+    "my relationship",
+    "who am i",
+    "what am i",
+    "tell me about me",
+    "describe me",
+)
+
+CREATOR_TARGET_PROFILE_TERMS = (
+    "know about jay",
+    "tell me about jay",
+    "jay's profile",
+    "jays profile",
+    "who is jay",
+    "what is jay",
+    "what do you think of jay",
+    "what do you think about jay",
+    "jay's relationship",
+    "jays relationship",
+)
+
+CREATOR_ORIGIN_TERMS = (
+    "your creator",
+    "who created you",
+    "who made you",
+    "who built you",
+    "who coded you",
+    "who developed you",
+    "made cutlass",
+    "built cutlass",
+    "created cutlass",
+    "coded cutlass",
+    "developed cutlass",
+    "captain cutlass creator",
+    "cutlass creator",
+    "creator profile",
+)
+
+CREATOR_DEV_TERMS = (
+    "dockerize",
+    "dockerized",
+    "docker container",
+    "containers",
+    "server rack",
+    "homelab",
+    "home lab",
+    "github",
+    "repository",
+    "repo",
+    "pull request",
+    "commit",
+    "pushed the build",
+    "rebuild you",
+    "rebuilt you",
+    "update you",
+    "updated you",
+    "upgrade you",
+    "upgraded you",
+    "new feature",
+    "bot feature",
+    "fix your code",
+    "your code",
+    "your logs",
+    "your database",
+    "your memory system",
+)
+
+
+def creator_profile_is_relevant(
+    message_content,
+    *,
+    speaker_is_creator=False,
+    target_is_creator=False,
+):
+    """
+    Decide whether Captain needs Jay's full creator profile.
+
+    Jay's creator status is always true, but the large profile contains
+    strong Docker/development running jokes. Loading it for every ordinary
+    message makes those callbacks leak into gameplay and casual chat, so
+    only include it when the latest message is actually about Jay, the
+    creator relationship, or Captain's development.
+    """
+
+    lowered = str(message_content or "").lower()
+
+    if not lowered.strip():
+        return False
+
+    if any(term in lowered for term in CREATOR_ORIGIN_TERMS):
+        return True
+
+    if any(term in lowered for term in CREATOR_DEV_TERMS):
+        return True
+
+    if speaker_is_creator and any(
+        term in lowered
+        for term in CREATOR_PROFILE_REQUEST_TERMS
+    ):
+        return True
+
+    if target_is_creator and any(
+        term in lowered
+        for term in CREATOR_TARGET_PROFILE_TERMS
+    ):
+        return True
+
+    if target_is_creator and re.search(
+        r"\b(?:creator|shipwright)\b.*\b(?:profile|relationship|know|remember|think|tell|who|what)\b",
+        lowered,
+    ):
+        return True
+
+    if target_is_creator and re.search(
+        r"\b(?:profile|relationship|know|remember|think|tell|who|what)\b.*\b(?:creator|shipwright)\b",
+        lowered,
+    ):
+        return True
+
+    return False
+
+
 def classify_conversation_topic(text):
     """
     Return a short label for the recent conversation subject.
@@ -434,13 +561,28 @@ async def build_member_context(
         "Doubloons: " + str(balance),
     ]
 
-    if is_creator(message.author.id, creator_user_id):
+    author_is_creator = is_creator(message.author.id, creator_user_id)
+    full_creator_context = creator_profile_is_relevant(
+        message.content,
+        speaker_is_creator=author_is_creator,
+    )
+
+    if author_is_creator:
         lines.append("SPECIAL STATUS: CREATOR / SHIPWRIGHT")
         lines.append("Creator canonical name: " + CREATOR_NAME)
         lines.append(
             "Creator address rule: use Jay or a creator title when addressing this member directly; never invent another name."
         )
-        lines.append(CREATOR_PROFILE)
+        lines.append(
+            "Creator context scope: use creator-specific callbacks only when the latest message asks about Jay personally, Captain's creation/development, or a directly relevant running joke. Otherwise answer the current topic naturally."
+        )
+
+        if full_creator_context:
+            lines.append(CREATOR_PROFILE)
+        else:
+            lines.append(
+                "Full creator profile omitted: this message does not need creator/development callbacks."
+            )
 
     if profile and profile["summary"]:
         lines.append("Profile: " + profile["summary"][:300])
@@ -493,6 +635,7 @@ async def build_target_member_context(
     message,
     *,
     bot_user_id,
+    creator_user_id,
     get_user_profile,
     get_user_memories_context,
     get_relationship,
@@ -534,6 +677,26 @@ async def build_target_member_context(
         "TARGET MEMBER: " + target.display_name,
         "TARGET USER ID: " + str(target.id),
     ]
+
+    target_is_creator = is_creator(target.id, creator_user_id)
+    target_full_creator_context = creator_profile_is_relevant(
+        message.content,
+        target_is_creator=target_is_creator,
+    )
+
+    if target_is_creator:
+        lines.append("TARGET SPECIAL STATUS: CREATOR / SHIPWRIGHT")
+        lines.append("Target canonical name: " + CREATOR_NAME)
+        lines.append(
+            "Target creator scope: use Jay's creator-specific details only when the latest message asks about Jay personally, Captain's creation/development, or a directly relevant running joke."
+        )
+
+        if target_full_creator_context:
+            lines.append(CREATOR_PROFILE)
+        else:
+            lines.append(
+                "Full target creator profile omitted: this message does not need creator/development callbacks."
+            )
 
     if profile and profile.get("summary"):
         lines.append("Profile: " + profile["summary"][:300])

@@ -1671,6 +1671,7 @@ Return ONLY Captain Cutlass's response.
         target_context = await build_target_member_context(
             message,
             bot_user_id=bot.user.id if bot.user else None,
+            creator_user_id=CREATOR_USER_ID,
             get_user_profile=get_user_profile,
             get_user_memories_context=get_user_memories_context,
             get_relationship=get_relationship,
@@ -6612,6 +6613,7 @@ async def on_message(
             build_target_member_context(
                 message,
                 bot_user_id=bot.user.id if bot.user else None,
+                creator_user_id=CREATOR_USER_ID,
                 get_user_profile=get_user_profile,
                 get_user_memories_context=get_user_memories_context,
                 get_relationship=get_relationship,
