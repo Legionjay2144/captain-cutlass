@@ -412,16 +412,31 @@ The compose file publishes the dashboard port as:
 8787:8787
 ```
 
-If you want a simple bearer/query token, add this to `.env`:
+Configure dashboard login in `.env` so you can open the port directly and sign in with a browser session:
 
 ```env
-DASHBOARD_TOKEN=choose-a-long-random-value
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=choose-a-long-random-password
+DASHBOARD_SESSION_SECRET=choose-a-different-long-random-secret
+DASHBOARD_SESSION_SECONDS=86400
 ```
 
 Then open:
 
 ```text
-http://SERVER_IP:8787/?token=choose-a-long-random-value
+http://SERVER_IP:8787/
+```
+
+For multiple dashboard users, use `DASHBOARD_USERS` instead of, or in addition to, the single username/password pair:
+
+```env
+DASHBOARD_USERS=admin:first-password,jay:second-password
+```
+
+`DASHBOARD_TOKEN` is still supported as an optional bearer/query token for API scripts and old bookmarks:
+
+```env
+DASHBOARD_TOKEN=choose-a-long-random-value
 ```
 
 Health/API checks:

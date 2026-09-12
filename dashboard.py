@@ -1,7 +1,13 @@
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
+import time
+from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -9,6 +15,16 @@ DB_PATH = os.getenv("DATABASE_PATH", "/app/data/captain.db")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8787"))
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "").strip()
+DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "").strip()
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "").strip()
+DASHBOARD_USERS = os.getenv("DASHBOARD_USERS", "").strip()
+DASHBOARD_SESSION_SECRET = (
+    os.getenv("DASHBOARD_SESSION_SECRET", "").strip()
+    or DASHBOARD_TOKEN
+    or secrets.token_urlsafe(32)
+)
+DASHBOARD_SESSION_SECONDS = int(os.getenv("DASHBOARD_SESSION_SECONDS", "86400"))
+DASHBOARD_COOKIE_NAME = "cutlass_dashboard_session"
 
 TEXT_LIMIT = 500
 LIST_LIMIT = 200
@@ -55,6 +71,83 @@ def clean_text(value, limit=TEXT_LIMIT):
     if len(text) > limit:
         return text[: limit - 1] + "…"
     return text
+
+
+def dashboard_user_map():
+    users = {}
+    if DASHBOARD_USERS:
+        for item in DASHBOARD_USERS.split(","):
+            if not item.strip() or ":" not in item:
+                continue
+            username, password = item.split(":", 1)
+            username = username.strip()
+            password = password.strip()
+            if username and password:
+                users[username] = password
+    if DASHBOARD_USERNAME and DASHBOARD_PASSWORD:
+        users[DASHBOARD_USERNAME] = DASHBOARD_PASSWORD
+    return users
+
+
+DASHBOARD_USER_MAP = dashboard_user_map()
+
+
+def dashboard_login_enabled():
+    return bool(DASHBOARD_USER_MAP)
+
+
+def make_session_token(username):
+    expires = str(int(time.time()) + DASHBOARD_SESSION_SECONDS)
+    payload = f"{username}|{expires}"
+    signature = hmac.new(
+        DASHBOARD_SESSION_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    raw = f"{payload}|{signature}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def verify_session_token(token):
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        username, expires, signature = raw.rsplit("|", 2)
+        if int(expires) < int(time.time()):
+            return None
+    except Exception:
+        return None
+
+    payload = f"{username}|{expires}"
+    expected = hmac.new(
+        DASHBOARD_SESSION_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    if username not in DASHBOARD_USER_MAP:
+        return None
+    return username
+
+
+def dashboard_cookie_header(username):
+    morsel = cookies.SimpleCookie()
+    morsel[DASHBOARD_COOKIE_NAME] = make_session_token(username)
+    morsel[DASHBOARD_COOKIE_NAME]["httponly"] = True
+    morsel[DASHBOARD_COOKIE_NAME]["path"] = "/"
+    morsel[DASHBOARD_COOKIE_NAME]["samesite"] = "Lax"
+    morsel[DASHBOARD_COOKIE_NAME]["max-age"] = str(DASHBOARD_SESSION_SECONDS)
+    return morsel.output(header="").strip()
+
+
+def expired_dashboard_cookie_header():
+    morsel = cookies.SimpleCookie()
+    morsel[DASHBOARD_COOKIE_NAME] = ""
+    morsel[DASHBOARD_COOKIE_NAME]["httponly"] = True
+    morsel[DASHBOARD_COOKIE_NAME]["path"] = "/"
+    morsel[DASHBOARD_COOKIE_NAME]["samesite"] = "Lax"
+    morsel[DASHBOARD_COOKIE_NAME]["max-age"] = "0"
+    return morsel.output(header="").strip()
 
 
 PERSONALITY_ARCHETYPES = {
@@ -895,6 +988,7 @@ INDEX_HTML = r"""
     <label>Server <select id="guildSelect"></select></label>
     <input id="memberSearch" placeholder="Filter crew by name, relationship, summary…" size="42">
     <button id="refreshBtn">Refresh</button>
+    <button type="button" onclick="window.location.href='/logout'">Log out</button>
     <span id="status" class="muted"></span>
   </section>
   <section id="content" class="grid"></section>
@@ -1191,6 +1285,46 @@ loadOverview().catch(err => { $('status').textContent = 'Error: ' + err.message;
 """
 
 
+LOGIN_HTML = r"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Captain Cutlass Dashboard Login</title>
+  <style>
+    :root { color-scheme: dark; --bg:#08111f; --panel:#111c2e; --text:#e8f0ff; --muted:#9fb0c9; --gold:#f6c453; --red:#ff6b6b; --line:#263a5d; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background:radial-gradient(circle at top left, #142647, var(--bg) 55%); color:var(--text); }
+    main { width:min(430px, 100%); background:linear-gradient(180deg, rgba(23,38,64,.96), rgba(14,25,43,.96)); border:1px solid var(--line); border-radius:22px; padding:26px; box-shadow:0 18px 60px rgba(0,0,0,.35); }
+    h1 { margin:0 0 8px; font-size:30px; letter-spacing:-.03em; }
+    p { margin:0 0 22px; color:var(--muted); line-height:1.5; }
+    label { display:grid; gap:7px; margin:14px 0; color:var(--muted); }
+    input, button { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px 13px; font:inherit; }
+    input { background:#0c1728; color:var(--text); }
+    button { margin-top:8px; cursor:pointer; background:#1b3358; color:var(--text); }
+    button:hover { border-color:var(--gold); }
+    .error { margin-bottom:14px; padding:10px 12px; border:1px solid rgba(255,107,107,.35); background:rgba(255,107,107,.1); border-radius:12px; color:#ffd3d3; }
+    .gold { color:var(--gold); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Captain Cutlass</h1>
+    <p>Sign in to view the dashboard for crew profiles, Living Ship stats, world history, jobs, and achievements.</p>
+    {error}
+    <form method="post" action="/login">
+      <label>Username <input name="username" autocomplete="username" required autofocus></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Open Dashboard</button>
+    </form>
+    <p style="margin-top:18px;font-size:13px;">Session access uses an <span class="gold">HttpOnly</span> cookie. Token auth still works for API checks.</p>
+  </main>
+</body>
+</html>
+"""
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "CutlassDashboard/1.0"
 
@@ -1200,17 +1334,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
             message = re.sub(r"token=[^&\s]+", "token=REDACTED", message)
         print("dashboard", self.address_string(), message)
 
-    def authorized(self):
-        if not DASHBOARD_TOKEN:
-            return True
+    def query_token(self):
         header = self.headers.get("Authorization", "")
         query = parse_qs(urlparse(self.path).query)
-        token = ""
         if header.startswith("Bearer "):
-            token = header.removeprefix("Bearer ").strip()
-        elif "token" in query:
-            token = query["token"][0]
-        return token == DASHBOARD_TOKEN
+            return header.removeprefix("Bearer ").strip()
+        if "token" in query:
+            return query["token"][0]
+        return ""
+
+    def session_username(self):
+        if not dashboard_login_enabled():
+            return None
+        raw_cookie = self.headers.get("Cookie", "")
+        jar = cookies.SimpleCookie()
+        try:
+            jar.load(raw_cookie)
+        except cookies.CookieError:
+            return None
+        morsel = jar.get(DASHBOARD_COOKIE_NAME)
+        if not morsel:
+            return None
+        return verify_session_token(morsel.value)
+
+    def authorized(self):
+        if DASHBOARD_TOKEN:
+            token = self.query_token()
+            if token and hmac.compare_digest(token, DASHBOARD_TOKEN):
+                return True
+        if self.session_username():
+            return True
+        return not DASHBOARD_TOKEN and not dashboard_login_enabled()
 
     def send_json(self, payload, status=200):
         body = json.dumps(json_safe_ids(payload), indent=2, default=str).encode("utf-8")
@@ -1221,29 +1375,57 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_html(self, body, status=200):
+    def send_html(self, body, status=200, headers=None):
         data = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
-    def do_GET(self):
-        if not self.authorized():
-            self.send_json({"error": "unauthorized"}, 401)
-            return
+    def redirect(self, location, headers=None):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
 
+    def send_login(self, error="", status=200):
+        error_html = f'<div class="error">{error}</div>' if error else ""
+        self.send_html(LOGIN_HTML.replace("{error}", error_html), status=status)
+
+    def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+
+        if path == "/login":
+            if self.authorized():
+                self.redirect("/")
+            else:
+                self.send_login()
+            return
+
+        if path == "/logout":
+            self.redirect("/login", {"Set-Cookie": expired_dashboard_cookie_header()})
+            return
+
+        if not self.authorized():
+            if path.startswith("/api/"):
+                self.send_json({"error": "unauthorized"}, 401)
+            else:
+                self.redirect("/login")
+            return
 
         try:
             if path == "/":
                 self.send_html(INDEX_HTML)
                 return
             if path == "/api/health":
-                self.send_json({"ok": True, "database": DB_PATH})
+                self.send_json({"ok": True, "database": DB_PATH, "login_enabled": dashboard_login_enabled()})
                 return
             if path == "/api/overview":
                 self.send_json(overview_payload())
@@ -1269,12 +1451,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_json({"error": str(exc)}, 500)
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path != "/login":
+            self.send_json({"error": "not found"}, 404)
+            return
+        if not dashboard_login_enabled():
+            self.send_login("Dashboard user login is not configured.", status=503)
+            return
+
+        try:
+            length = min(int(self.headers.get("Content-Length", "0")), 10000)
+        except ValueError:
+            length = 0
+        fields = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
+        username = (fields.get("username") or [""])[0].strip()
+        password = (fields.get("password") or [""])[0]
+        expected = DASHBOARD_USER_MAP.get(username)
+
+        if expected and hmac.compare_digest(password, expected):
+            self.redirect("/", {"Set-Cookie": dashboard_cookie_header(username)})
+            return
+
+        self.send_login("Invalid dashboard username or password.", status=401)
+
 
 if __name__ == "__main__":
     print(f"Captain Cutlass dashboard listening on {DASHBOARD_HOST}:{DASHBOARD_PORT}")
     print(f"Database: {DB_PATH}")
+    if dashboard_login_enabled():
+        print(f"Dashboard user login: enabled for {len(DASHBOARD_USER_MAP)} user(s)")
+    else:
+        print("Dashboard user login: disabled")
     if DASHBOARD_TOKEN:
         print("Dashboard token auth: enabled")
-    else:
-        print("Dashboard token auth: disabled; rely on localhost binding or firewall")
+    elif not dashboard_login_enabled():
+        print("Dashboard auth: disabled; rely on localhost binding or firewall")
     ThreadingHTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler).serve_forever()
