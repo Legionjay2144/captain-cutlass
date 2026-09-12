@@ -47,6 +47,14 @@ def db_connect():
     return conn
 
 
+def db_write_connect():
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(f"Database not found: {DB_PATH}")
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def table_exists(conn, table):
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -929,6 +937,102 @@ def global_member_payload(user_id):
         }
 
 
+DASHBOARD_GUILD_BOOLEAN_FIELDS = {
+    "quiet": "quiet",
+    "event_mode": "event_mode",
+    "welcome_enabled": "welcome_enabled",
+    "returning_enabled": "returning_enabled",
+    "chronicle_enabled": "chronicle_enabled",
+}
+
+DASHBOARD_SHIP_BOOLEAN_FIELDS = {
+    "ship_world_enabled": "enabled",
+}
+
+
+def dashboard_control_payload(guild_id, control, value):
+    guild_id = safe_int(guild_id)
+    if control in DASHBOARD_GUILD_BOOLEAN_FIELDS:
+        field = DASHBOARD_GUILD_BOOLEAN_FIELDS[control]
+        next_value = 1 if value else 0
+        with db_write_connect() as conn:
+            if not table_exists(conn, "guild_settings"):
+                raise ValueError("guild_settings table is missing")
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
+            conn.execute(f"UPDATE guild_settings SET {field}=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (next_value, guild_id))
+            conn.commit()
+        return {"ok": True, "control": control, "value": next_value}
+
+    if control in DASHBOARD_SHIP_BOOLEAN_FIELDS:
+        field = DASHBOARD_SHIP_BOOLEAN_FIELDS[control]
+        next_value = 1 if value else 0
+        with db_write_connect() as conn:
+            if not table_exists(conn, "ship_settings"):
+                raise ValueError("ship_settings table is missing")
+            conn.execute("INSERT OR IGNORE INTO ship_settings (guild_id) VALUES (?)", (guild_id,))
+            conn.execute(f"UPDATE ship_settings SET {field}=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (next_value, guild_id))
+            conn.commit()
+        return {"ok": True, "control": control, "value": next_value}
+
+    raise ValueError("Unknown dashboard control.")
+
+
+def dashboard_set_ship_channel(guild_id, channel_id):
+    guild_id = safe_int(guild_id)
+    channel_id = safe_int(channel_id)
+    if channel_id < 0:
+        raise ValueError("Channel ID must be 0 or a positive Discord channel ID.")
+    with db_write_connect() as conn:
+        if not table_exists(conn, "ship_settings"):
+            raise ValueError("ship_settings table is missing")
+        conn.execute("INSERT OR IGNORE INTO ship_settings (guild_id) VALUES (?)", (guild_id,))
+        conn.execute("UPDATE ship_settings SET channel_id=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (channel_id, guild_id))
+        conn.commit()
+    return {"ok": True, "channel_id": channel_id}
+
+
+def dashboard_set_chronicle_channel(guild_id, channel_id):
+    guild_id = safe_int(guild_id)
+    channel_id = safe_int(channel_id)
+    if channel_id < 0:
+        raise ValueError("Channel ID must be 0 or a positive Discord channel ID.")
+    with db_write_connect() as conn:
+        if not table_exists(conn, "guild_settings"):
+            raise ValueError("guild_settings table is missing")
+        conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
+        conn.execute("UPDATE guild_settings SET chronicle_channel_id=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (channel_id, guild_id))
+        conn.commit()
+    return {"ok": True, "channel_id": channel_id}
+
+
+def dashboard_set_welcome_channel(guild_id, channel_id):
+    guild_id = safe_int(guild_id)
+    channel_id = safe_int(channel_id)
+    if channel_id < 0:
+        raise ValueError("Channel ID must be 0 or a positive Discord channel ID.")
+    with db_write_connect() as conn:
+        if not table_exists(conn, "guild_settings"):
+            raise ValueError("guild_settings table is missing")
+        conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
+        conn.execute("UPDATE guild_settings SET welcome_channel_id=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (channel_id, guild_id))
+        conn.commit()
+    return {"ok": True, "channel_id": channel_id}
+
+
+def dashboard_set_mood(guild_id, mood):
+    guild_id = safe_int(guild_id)
+    mood = clean_text(str(mood or "").strip(), 60)
+    if not mood:
+        raise ValueError("Mood cannot be empty.")
+    with db_write_connect() as conn:
+        if not table_exists(conn, "guild_settings"):
+            raise ValueError("guild_settings table is missing")
+        conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
+        conn.execute("UPDATE guild_settings SET mood=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (mood, guild_id))
+        conn.commit()
+    return {"ok": True, "mood": mood}
+
+
 def global_payload():
     with db_connect() as conn:
         users = global_user_rows(conn)
@@ -944,10 +1048,12 @@ def global_payload():
 def guild_summary(conn, guild_id):
     settings = one(conn, "SELECT * FROM guild_settings WHERE guild_id=?", (guild_id,)) if table_exists(conn, "guild_settings") else None
     ship = one(conn, "SELECT * FROM ships WHERE guild_id=?", (guild_id,)) if table_exists(conn, "ships") else None
+    ship_settings = one(conn, "SELECT * FROM ship_settings WHERE guild_id=?", (guild_id,)) if table_exists(conn, "ship_settings") else None
     return {
         "guild_id": guild_id,
         "guild_name": (settings or {}).get("guild_name") or "Server " + str(guild_id),
         "settings": settings,
+        "ship_settings": ship_settings,
         "ship": ship,
         "counts": dashboard_counts(conn, guild_id),
     }
@@ -1393,6 +1499,7 @@ function globalUserTable(users) {
 function renderGuild() {
   const ship = guild.ship || {};
   const settings = guild.settings || {};
+  const shipSettings = guild.ship_settings || {};
   const counts = guild.counts || {};
   const members = filterMembers(guild.members || []);
   const maxHull = ship.level ? 100 + ((Number(ship.level)-1) * 10) : 100;
@@ -1409,9 +1516,10 @@ function renderGuild() {
     `, 'span-4')}
     ${card(`Server Overview — ${esc(guild.guild_name || selectedGuild)}`, `
       <div class="stats">
-        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Welcome', settings.welcome_enabled ? 'On' : 'Off')}${stat('Returners', settings.returning_enabled ? 'On' : 'Off')}${stat('Events', settings.event_mode ? 'On' : 'Off')}${stat('Ship World', shipSettings.enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
+    ${card('Bot Controls', botControls(settings, shipSettings), 'span-12')}
     ${card('History Import Status', importStatusPanel(guild.history_import_summary, guild.history_imports, false), 'span-12')}
     ${card('Crew Personality Profiles', personalityCards(members), 'span-12')}
     ${card('Crew Table', memberTable(members), 'span-12')}
@@ -1424,6 +1532,74 @@ function renderGuild() {
     ${card('Recent Voyages', voyageList(guild.voyages), 'span-6')}
     ${card('Captured Ships', capturedList(guild.captured_ships), 'span-6')}
   `;
+}
+
+function botControls(settings, shipSettings) {
+  if (!$('adminBtn') || $('adminBtn').style.display === 'none') {
+    return '<p class="muted">Dashboard bot controls are visible to dashboard admins.</p>';
+  }
+  return `
+    <div class="toolbar">
+      ${controlButton('Quiet Mode', 'quiet', !settings.quiet, settings.quiet)}
+      ${controlButton('Event Mode', 'event_mode', !settings.event_mode, settings.event_mode)}
+      ${controlButton('Welcomes', 'welcome_enabled', !settings.welcome_enabled, settings.welcome_enabled)}
+      ${controlButton('Returners', 'returning_enabled', !settings.returning_enabled, settings.returning_enabled)}
+      ${controlButton('Chronicles', 'chronicle_enabled', !settings.chronicle_enabled, settings.chronicle_enabled)}
+      ${controlButton('Ship World', 'ship_world_enabled', !shipSettings.enabled, shipSettings.enabled)}
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <input id="dashMood" placeholder="Captain mood" value="${esc(settings.mood || '')}">
+      <button type="button" onclick="setDashboardMood()">Set Mood</button>
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <input id="shipChannelId" placeholder="Ship World channel ID" value="${esc(shipSettings.channel_id || '')}">
+      <button type="button" onclick="setDashboardChannel('ship','shipChannelId')">Set Ship Channel</button>
+      <button type="button" onclick="clearDashboardChannel('ship','shipChannelId')">Clear Ship Channel</button>
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <input id="welcomeChannelId" placeholder="Welcome channel ID" value="${esc(settings.welcome_channel_id || '')}">
+      <button type="button" onclick="setDashboardChannel('welcome','welcomeChannelId')">Set Welcome Channel</button>
+      <button type="button" onclick="clearDashboardChannel('welcome','welcomeChannelId')">Clear Welcome Channel</button>
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <input id="chronicleChannelId" placeholder="Chronicle channel ID" value="${esc(settings.chronicle_channel_id || '')}">
+      <button type="button" onclick="setDashboardChannel('chronicle','chronicleChannelId')">Set Chronicle Channel</button>
+      <button type="button" onclick="clearDashboardChannel('chronicle','chronicleChannelId')">Clear Chronicle Channel</button>
+    </div>
+    <p class="muted">These buttons update the same database settings as Discord admin commands. Use Discord channel IDs for channel fields.</p>
+  `;
+}
+
+function controlButton(label, control, nextValue, active) {
+  return `<button type="button" onclick="setDashboardControl('${control}', ${nextValue ? 'true' : 'false'})">${active ? 'Disable' : 'Enable'} ${esc(label)}</button>`;
+}
+
+async function setDashboardControl(control, value) {
+  const result = await apiJson('/api/admin/control', {guild_id: selectedGuild, control, value});
+  guild = result.guild;
+  renderGuild();
+  $('status').textContent = 'Updated ' + control;
+}
+
+async function setDashboardChannel(target, inputId) {
+  const channel_id = $(inputId).value.trim() || '0';
+  const result = await apiJson('/api/admin/channel', {guild_id: selectedGuild, target, channel_id});
+  guild = result.guild;
+  renderGuild();
+  $('status').textContent = 'Updated ' + target + ' channel';
+}
+
+async function clearDashboardChannel(target, inputId) {
+  $(inputId).value = '0';
+  await setDashboardChannel(target, inputId);
+}
+
+async function setDashboardMood() {
+  const mood = $('dashMood').value.trim();
+  const result = await apiJson('/api/admin/mood', {guild_id: selectedGuild, mood});
+  guild = result.guild;
+  renderGuild();
+  $('status').textContent = 'Updated mood';
 }
 
 function filterMembers(members) {
@@ -1956,6 +2132,68 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 400)
                 return
             self.send_json({"user": user, "users": dashboard_public_users()}, 201)
+            return
+
+        if path == "/api/admin/control":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            guild_id = safe_int(payload.get("guild_id"))
+            if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                self.send_json({"error": "server access required"}, 403)
+                return
+            try:
+                result = dashboard_control_payload(guild_id, payload.get("control"), payload.get("value"))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            result["guild"] = guild_payload(guild_id)
+            self.send_json(result)
+            return
+
+        if path == "/api/admin/channel":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            guild_id = safe_int(payload.get("guild_id"))
+            if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                self.send_json({"error": "server access required"}, 403)
+                return
+            target = payload.get("target")
+            try:
+                if target == "ship":
+                    result = dashboard_set_ship_channel(guild_id, payload.get("channel_id"))
+                elif target == "chronicle":
+                    result = dashboard_set_chronicle_channel(guild_id, payload.get("channel_id"))
+                elif target == "welcome":
+                    result = dashboard_set_welcome_channel(guild_id, payload.get("channel_id"))
+                else:
+                    raise ValueError("Unknown channel target.")
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            result["guild"] = guild_payload(guild_id)
+            self.send_json(result)
+            return
+
+        if path == "/api/admin/mood":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            guild_id = safe_int(payload.get("guild_id"))
+            if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                self.send_json({"error": "server access required"}, 403)
+                return
+            try:
+                result = dashboard_set_mood(guild_id, payload.get("mood"))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            result["guild"] = guild_payload(guild_id)
+            self.send_json(result)
             return
 
         if path == "/api/admin/users/access":

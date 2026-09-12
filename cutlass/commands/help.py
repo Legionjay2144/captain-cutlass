@@ -57,6 +57,11 @@ async def handle_help_command(
                 "**Admiralty Controls** — "
                 "`!cutlass help admin`"
             )
+            help_lines.append(
+                "**Dashboard Controls** — browser controls for "
+                "quiet mode, Ship World, welcomes, chronicles, "
+                "and account visibility"
+            )
 
         help_lines.extend(
             [
@@ -471,7 +476,8 @@ async def handle_help_command(
             title="⚙️ Admiralty Controls",
             description=(
                 "Server configuration commands reserved "
-                "for the Admiralty."
+                "for the Admiralty. Most core toggles can also "
+                "be managed from the web dashboard by dashboard admins."
             ),
             color=0x3498DB
         )
@@ -535,6 +541,20 @@ async def handle_help_command(
                 "`!cutlass event on/off`\n"
                 "`!cutlass ai` / `!cutlass ai status`\n"
                 "`!cutlass treasure start ANSWER | CLUE`"
+            ),
+            inline=False
+        )
+
+
+        embed.add_field(
+            name="Web Dashboard Controls",
+            value=(
+                "Dashboard admins can toggle quiet mode, event mode, "
+                "welcomes, returners, chronicles, and Ship World; "
+                "set Ship World/welcome/chronicle channel IDs; set "
+                "Captain mood; and choose which dashboard users can "
+                "view global info or specific servers. Use Discord "
+                "commands when you need channel mentions or live command feedback."
             ),
             inline=False
         )
