@@ -1742,7 +1742,7 @@ let assessmentStatus = null;
 let selectedGuild = null;
 let currentView = 'server';
 let searchRenderTimer = null;
-const DASHBOARD_RENDER_LIMIT = 300;
+const DASHBOARD_RENDER_LIMIT = 100;
 const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
 if (dashboardToken) localStorage.setItem('cutlassDashboardToken', dashboardToken);
 
@@ -1779,11 +1779,11 @@ function scheduleSearchRender() {
   searchRenderTimer = setTimeout(() => {
     searchRenderTimer = null;
     requestAnimationFrame(() => {
-      if (currentView === 'global') renderGlobal();
-      else if (guild) renderGuild();
+      if (currentView === 'global') renderGlobalSearchSections();
+      else if (guild) renderGuildSearchSections();
       $('status').textContent = 'Ready';
     });
-  }, 180);
+  }, 220);
 }
 
 async function loadOverview() {
@@ -1844,9 +1844,6 @@ async function loadGuild(guildId) {
 
 function renderGlobal() {
   const counts = globalData.counts || {};
-  const users = filterGlobalUsers(globalData.users || []);
-  const visibleUsers = visibleRows(users);
-  const userLimitNote = resultLimitNote(users.length, visibleUsers.length);
   $('content').innerHTML = `
     ${card('Global Overview', `
       <div class="stats">
@@ -1857,8 +1854,18 @@ function renderGlobal() {
     ${card('AI Message Assessment', assessmentPanel(assessmentStatus), 'span-12')}
     ${card('History Import Status', importStatusPanel(globalData.history_import_summary, globalData.history_imports, true), 'span-12')}
     ${card('Multi-Server Users', globalUserCards(globalData.multi_server_users || []), 'span-12')}
-    ${card('Global Crew Profiles', userLimitNote + globalUserTable(visibleUsers), 'span-12')}
+    <div id="globalSearchSections" class="span-12"></div>
   `;
+  renderGlobalSearchSections();
+}
+
+function renderGlobalSearchSections() {
+  const target = $('globalSearchSections');
+  if (!target || !globalData) return;
+  const users = filterGlobalUsers(globalData.users || []);
+  const visibleUsers = visibleRows(users);
+  const userLimitNote = resultLimitNote(users.length, visibleUsers.length);
+  target.innerHTML = card('Global Crew Profiles', userLimitNote + globalUserTable(visibleUsers), 'span-12');
 }
 
 function assessmentPanel(status) {
@@ -1940,9 +1947,6 @@ function renderGuild() {
   const settings = guild.settings || {};
   const shipSettings = guild.ship_settings || {};
   const counts = guild.counts || {};
-  const members = filterMembers(guild.members || []);
-  const visibleMembers = visibleRows(members);
-  const memberLimitNote = resultLimitNote(members.length, visibleMembers.length);
   const maxHull = ship.level ? 100 + ((Number(ship.level)-1) * 10) : 100;
   $('content').innerHTML = `
     ${card('Living Ship', `
@@ -1962,8 +1966,7 @@ function renderGuild() {
     `, 'span-8')}
     ${card('Bot Controls', botControls(settings, shipSettings), 'span-12')}
     ${card('History Import Status', importStatusPanel(guild.history_import_summary, guild.history_imports, false), 'span-12')}
-    ${card('Crew Personality Profiles', memberLimitNote + personalityCards(visibleMembers), 'span-12')}
-    ${card('Crew Table', memberLimitNote + memberTable(visibleMembers), 'span-12')}
+    <div id="guildSearchSections" class="span-12"></div>
     ${card('Top Doubloons', simpleRows(guild.top_doubloons, ['username','doubloons']), 'span-6')}
     ${card('Ship Contributors', simpleRows(guild.top_contributors, ['username','amount']), 'span-6')}
     ${card('Crew Work Summary', simpleRows(guild.crew_work, ['job_label','total_runs','payout_total','repair_hull_total']), 'span-6')}
@@ -1972,6 +1975,19 @@ function renderGuild() {
     ${card('Recent World History', historyList(guild.recent_world_history), 'span-6')}
     ${card('Recent Voyages', voyageList(guild.voyages), 'span-6')}
     ${card('Captured Ships', capturedList(guild.captured_ships), 'span-6')}
+  `;
+  renderGuildSearchSections();
+}
+
+function renderGuildSearchSections() {
+  const target = $('guildSearchSections');
+  if (!target || !guild) return;
+  const members = filterMembers(guild.members || []);
+  const visibleMembers = visibleRows(members);
+  const memberLimitNote = resultLimitNote(members.length, visibleMembers.length);
+  target.innerHTML = `
+    ${card('Crew Personality Profiles', memberLimitNote + personalityCards(visibleMembers), 'span-12')}
+    ${card('Crew Table', memberLimitNote + memberTable(visibleMembers), 'span-12')}
   `;
 }
 
