@@ -5179,7 +5179,8 @@ async def on_ready():
         for guild in bot.guilds:
 
             await ensure_guild_settings(
-                guild.id
+                guild.id,
+                guild.name
             )
             await ensure_ship(guild.id)
             await ensure_parrot(guild.id)
@@ -6394,6 +6395,14 @@ IDENTITY RULES:
 
 
 @bot.event
+async def on_guild_join(guild):
+    await ensure_guild_settings(guild.id, guild.name)
+    await ensure_ship(guild.id)
+    await ensure_parrot(guild.id)
+    invalidate_settings_cache(guild.id)
+
+
+@bot.event
 async def on_message(
     message
 ):
@@ -6404,6 +6413,12 @@ async def on_message(
 
     if message.guild is None:
         return
+
+
+    await ensure_guild_settings(
+        message.guild.id,
+        message.guild.name
+    )
 
 
     if not channel_allowed(

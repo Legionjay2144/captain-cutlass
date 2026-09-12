@@ -604,6 +604,7 @@ async def initialize_database():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id INTEGER PRIMARY KEY,
+                guild_name TEXT DEFAULT '',
                 mood TEXT DEFAULT 'cheerful',
                 quiet INTEGER DEFAULT 0,
                 event_mode INTEGER DEFAULT 0,
@@ -614,6 +615,9 @@ async def initialize_database():
         """)
 
         # Upgrade older guild_settings tables.
+
+        if not await column_exists(db, "guild_settings", "guild_name"):
+            await db.execute("ALTER TABLE guild_settings ADD COLUMN guild_name TEXT DEFAULT ''")
 
         if not await column_exists(
             db,
@@ -2281,7 +2285,8 @@ async def get_journal(
 
 
 async def ensure_guild_settings(
-    guild_id
+    guild_id,
+    guild_name=None
 ):
 
     db = await get_db()
@@ -2290,12 +2295,25 @@ async def ensure_guild_settings(
 
         await db.execute("""
             INSERT OR IGNORE INTO guild_settings (
-                guild_id
+                guild_id,
+                guild_name
             )
-            VALUES (?)
+            VALUES (?, ?)
         """, (
             guild_id,
+            guild_name or "",
         ))
+
+        if guild_name:
+            await db.execute("""
+                UPDATE guild_settings
+                SET guild_name = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            """, (
+                guild_name,
+                guild_id,
+            ))
 
         await db.commit()
 

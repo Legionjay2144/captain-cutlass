@@ -639,6 +639,7 @@ def guild_summary(conn, guild_id):
     ship = one(conn, "SELECT * FROM ships WHERE guild_id=?", (guild_id,)) if table_exists(conn, "ships") else None
     return {
         "guild_id": guild_id,
+        "guild_name": (settings or {}).get("guild_name") or "Server " + str(guild_id),
         "settings": settings,
         "ship": ship,
         "counts": dashboard_counts(conn, guild_id),
@@ -930,7 +931,8 @@ async function loadOverview() {
   select.innerHTML = `<option value="__global__">Global Info — all servers and matched users</option>` + overview.guilds.map(g => {
     const counts = g.counts || {};
     const shipName = (g.ship && g.ship.name) || 'No ship';
-    return `<option value="${g.guild_id}">${g.guild_id} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
+    const guildName = g.guild_name || `Server ${g.guild_id}`;
+    return `<option value="${g.guild_id}">${esc(guildName)} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
   }).join('');
   selectedGuild = select.value || '__global__';
   await loadSelected(selectedGuild);
@@ -957,7 +959,7 @@ async function loadGuild(guildId) {
   $('status').textContent = 'Loading server…';
   guild = await api(`/api/guild/${guildId}`);
   renderGuild();
-  $('status').textContent = `Loaded ${guildId}`;
+  $('status').textContent = `Loaded ${guild.guild_name || guildId}`;
 }
 
 function renderGlobal() {
@@ -1028,7 +1030,7 @@ function renderGuild() {
       <p class="muted">Supplies</p><div class="bar"><i style="width:${pct(ship.supplies)}%"></i></div><p>${num(ship.supplies)} / 100</p>
       <p class="muted">Morale</p><div class="bar"><i style="width:${pct(ship.morale)}%"></i></div><p>${num(ship.morale)} / 100</p>
     `, 'span-4')}
-    ${card('Server Overview', `
+    ${card(`Server Overview — ${esc(guild.guild_name || selectedGuild)}`, `
       <div class="stats">
         ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
