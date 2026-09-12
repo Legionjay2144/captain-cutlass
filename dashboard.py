@@ -1756,6 +1756,8 @@ INDEX_HTML = r"""
     .sub { color:#c8e8ed; margin-top:8px; letter-spacing:.03em; text-shadow:0 1px 0 #000; }
     main { padding:24px clamp(16px,4vw,48px) 60px; display:grid; gap:20px; }
     .toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .app-tabs { display:flex; gap:8px; flex-wrap:wrap; width:100%; }
+    .app-tab.active { border-color:var(--gold); color:#fff6d8; box-shadow:0 0 0 2px rgba(215,162,58,.16), 0 0 18px rgba(215,162,58,.18); }
     select, input, button { background:linear-gradient(180deg, #0b191d, #030708); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:10px 12px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 0 16px rgba(16,231,239,.08); }
     input::placeholder { color:#638990; }
     button { cursor:pointer; background:linear-gradient(180deg, rgba(16,231,239,.22), rgba(0,107,120,.22)), #071114; color:#dffcff; border-color:rgba(16,231,239,.72); font-weight:800; text-transform:uppercase; letter-spacing:.06em; text-shadow:0 0 8px rgba(16,231,239,.7); }
@@ -1831,7 +1833,12 @@ INDEX_HTML = r"""
 </header>
 <main>
   <section class="toolbar card">
-    <label>Server <select id="guildSelect"></select></label>
+    <div class="app-tabs">
+      <button id="tabServer" class="app-tab" type="button" onclick="switchApp('server')">Server Dashboard</button>
+      <button id="tabGlobal" class="app-tab" type="button" onclick="switchApp('global')">Global Info</button>
+      <button id="tabPolice" class="app-tab" type="button" onclick="switchApp('police')">Police Chief</button>
+    </div>
+    <label id="serverPickerWrap">Server <select id="guildSelect"></select></label>
     <input id="memberSearch" placeholder="Filter crew by name, relationship, summary…" size="42">
     <button id="refreshBtn">Refresh Charts</button>
     <button id="accountBtn" type="button">My Account</button>
@@ -1853,6 +1860,7 @@ let sessionUser = null;
 let assessmentStatus = null;
 let selectedGuild = null;
 let currentView = 'server';
+let currentApp = 'server';
 let policeData = null;
 let policeGuildId = null;
 let searchRenderTimer = null;
@@ -1914,32 +1922,51 @@ async function loadOverview() {
   if (sessionUser && sessionUser.role === 'admin') $('adminBtn').style.display = '';
   overview = await api('/api/overview');
   const select = $('guildSelect');
-  const globalOption = overview.can_view_global ? `<option value="__global__">Global Info — all servers and matched users</option><option value="__police__">Police Chief Roster</option>` : '';
   const serverOptions = overview.guilds.map(g => {
     const counts = g.counts || {};
     const shipName = (g.ship && g.ship.name) || 'No ship';
     const guildName = g.guild_name || `Server ${g.guild_id}`;
     return `<option value="${g.guild_id}">${esc(guildName)} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
   }).join('');
-  select.innerHTML = globalOption + serverOptions;
-  selectedGuild = select.value || (overview.can_view_global ? '__global__' : ((overview.guilds[0] || {}).guild_id || ''));
-  if (!selectedGuild) {
-    $('content').innerHTML = card('No Access Assigned', '<p class="muted">This dashboard account does not have access to global info or any servers yet. Ask an admin to update Crew Access.</p>');
+  select.innerHTML = serverOptions;
+  selectedGuild = selectedGuild && selectedGuild !== '__global__' && selectedGuild !== '__police__' ? selectedGuild : ((overview.guilds[0] || {}).guild_id || '');
+  if (selectedGuild) select.value = selectedGuild;
+  if (!selectedGuild && currentApp === 'server') {
+    $('content').innerHTML = card('No Access Assigned', '<p class="muted">This dashboard account does not have access to any servers yet. Ask an admin to update Crew Access.</p>');
     return;
   }
-  await loadSelected(selectedGuild);
+  await switchApp(overview.can_view_global ? 'global' : 'server');
   $('status').textContent = 'Ready';
 }
 
+function updateNav() {
+  for (const [id, app] of [['tabServer','server'], ['tabGlobal','global'], ['tabPolice','police']]) {
+    const el = $(id);
+    if (el) el.classList.toggle('active', currentApp === app);
+  }
+  if ($('serverPickerWrap')) $('serverPickerWrap').style.display = currentApp === 'server' || currentApp === 'police' ? '' : 'none';
+  if ($('memberSearch')) $('memberSearch').style.display = currentApp === 'server' || currentApp === 'global' ? '' : 'none';
+}
+
+async function switchApp(app) {
+  currentApp = app;
+  updateNav();
+  if (app === 'global') return await loadGlobal();
+  if (app === 'police') return await loadPoliceChief($('guildSelect').value || selectedGuild);
+  return await loadGuild($('guildSelect').value || selectedGuild);
+}
+
 async function loadSelected(value) {
-  if (value === '__global__') return await loadGlobal();
-  if (value === '__police__') return await loadPoliceChief();
+  selectedGuild = value;
+  if (currentApp === 'police') return await loadPoliceChief(value);
+  if (currentApp === 'global') return await loadGlobal();
   return await loadGuild(value);
 }
 
 async function loadGlobal() {
   currentView = 'global';
-  selectedGuild = '__global__';
+  currentApp = 'global';
+  updateNav();
   $('status').textContent = 'Loading global info…';
   const loaded = await Promise.all([
     api('/api/global'),
@@ -1956,7 +1983,9 @@ async function loadGlobal() {
 
 async function loadGuild(guildId) {
   currentView = 'server';
+  currentApp = 'server';
   selectedGuild = guildId;
+  updateNav();
   $('status').textContent = 'Loading server…';
   guild = await api(`/api/guild/${guildId}`);
   indexSearchRows(guild.members || []);
@@ -2066,8 +2095,11 @@ function globalUserTable(users) {
 
 async function loadPoliceChief(guildId=null) {
   currentView = 'police';
-  selectedGuild = '__police__';
-  policeGuildId = guildId || policeGuildId || ((overview.guilds[0] || {}).guild_id || 0);
+  currentApp = 'police';
+  policeGuildId = guildId || policeGuildId || $('guildSelect').value || ((overview.guilds[0] || {}).guild_id || 0);
+  selectedGuild = policeGuildId;
+  if ($('guildSelect')) $('guildSelect').value = policeGuildId;
+  updateNav();
   $('status').textContent = 'Loading Police Chief roster…';
   policeData = await api(`/api/police-chief?guild_id=${encodeURIComponent(policeGuildId)}`);
   renderPoliceChief();
@@ -2083,7 +2115,7 @@ function renderPoliceChief() {
   const counts = (policeData && policeData.counts) || {};
   $('content').innerHTML = `
     ${card('Police Chief Roster', `
-      <div class="toolbar"><label>Server ${policeGuildSelector()}</label><button type="button" onclick="loadPoliceChief(policeGuildId)">Refresh</button></div>
+      <div class="toolbar"><button type="button" onclick="loadPoliceChief(policeGuildId)">Refresh</button><span class="muted">Use the server dropdown above to choose which server roster to manage.</span></div>
       <div class="stats">${stat('Players', counts.players || 0)}${stat('Linked Discord', counts.linked || 0)}${stat('Unlinked', counts.unlinked || 0)}${stat('Total Power', num(counts.total_power || 0))}${stat('Pending Imports', counts.pending_imports || 0)}</div>
     `, 'span-12')}
     ${card('Add / Edit Player', policePlayerForm(), 'span-12')}
@@ -2644,7 +2676,7 @@ async function resetDashboardPassword(username, prefix) {
 }
 
 $('guildSelect').addEventListener('change', e => loadSelected(e.target.value));
-$('refreshBtn').addEventListener('click', () => selectedGuild ? loadSelected(selectedGuild) : loadOverview());
+$('refreshBtn').addEventListener('click', () => currentApp === 'global' ? loadGlobal() : currentApp === 'police' ? loadPoliceChief(policeGuildId || $('guildSelect').value) : (selectedGuild ? loadGuild(selectedGuild) : loadOverview()));
 $('accountBtn').addEventListener('click', () => openAccountSettings());
 $('adminBtn').addEventListener('click', () => openAdminUsers().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); }));
 $('memberSearch').addEventListener('input', () => scheduleSearchRender());
