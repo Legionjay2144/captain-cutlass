@@ -195,15 +195,32 @@ def format_crew_personality_context(data, *, target=False):
     secondary = ", ".join(personality.get("secondary") or []) or "none"
     evidence = ", ".join(personality.get("evidence") or []) or "none"
 
-    return [
+    lines = [
         prefix + ": " + str(personality.get("label")),
         prefix + " confidence: " + str(personality.get("confidence", 0)) + "%",
         prefix + " traits: " + traits,
         prefix + " blended with: " + secondary,
         prefix + " evidence keywords: " + evidence,
-        prefix + " source: " + str(messages_analyzed) + " lifetime stored messages analyzed (" + str(message_count) + " stored), plus memories, jokes, achievements, relationship, and crew activity.",
-        prefix + " use rule: Use this only as a light tone and callback hint. Do not call it a moral verdict, diagnosis, or fixed identity. Do not announce the label unless the user asks about profiles, personality, or what Captain knows about that member.",
+        prefix + " local source: " + str(messages_analyzed) + " lifetime stored messages analyzed in this server (" + str(message_count) + " stored), plus local memories, jokes, achievements, relationship, and crew activity.",
     ]
+
+    global_profile = data.get("global_profile") or {}
+    global_personality = global_profile.get("personality_type") or {}
+    global_base = global_profile.get("base") or {}
+    if global_personality.get("label") and int(global_base.get("guild_count") or 0) > 1:
+        global_traits = ", ".join(global_personality.get("traits") or []) or "none"
+        lines.extend([
+            prefix + " cross-server recognition: same Discord user_id seen in " + str(global_base.get("guild_count", 0)) + " servers.",
+            prefix + " cross-server profile: " + str(global_personality.get("label")) + " (" + str(global_personality.get("confidence", 0)) + "% confidence).",
+            prefix + " cross-server traits: " + global_traits,
+            prefix + " cross-server source: " + str(global_base.get("message_count", 0)) + " total stored messages, " + str(global_base.get("memory_count", 0)) + " memories, " + str(global_base.get("joke_count", 0)) + " jokes, " + str(global_base.get("achievement_count", 0)) + " achievements across all servers.",
+            prefix + " cross-server rule: Use only for recognition and broad tone. Current server relationship, memories, gameplay, economy, and permissions remain authoritative for this conversation.",
+        ])
+
+    lines.append(
+        prefix + " use rule: Use this only as a light tone and callback hint. Do not call it a moral verdict, diagnosis, or fixed identity. Do not announce the label unless the user asks about profiles, personality, or what Captain knows about that member."
+    )
+    return lines
 
 
 def creator_context_is_contaminated(text):

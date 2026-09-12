@@ -187,6 +187,71 @@ def infer_personality_type(signal_text, base=None):
     }
 
 
+def global_member_signal_text(conn, user_id):
+    parts = []
+    signal_queries = (
+        ("relationships", "relationship_type || ' ' || COALESCE(nickname, '') || ' ' || COALESCE(opinion, '')", "ORDER BY updated_at ASC"),
+        ("user_profiles", "summary", "AND summary IS NOT NULL AND summary != '' ORDER BY updated_at ASC"),
+        ("user_memories", "memory", "ORDER BY guild_id ASC, confidence DESC, id ASC"),
+        ("running_jokes", "joke", "ORDER BY guild_id ASC, id ASC"),
+        ("relationship_events", "event", "ORDER BY guild_id ASC, importance DESC, id ASC"),
+        ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY guild_id ASC, id ASC"),
+        ("messages", "content", "AND content IS NOT NULL AND content != '' ORDER BY id ASC"),
+    )
+    for table, column, order in signal_queries:
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(
+            f"SELECT {column} AS text FROM {table} WHERE user_id=? {order}",
+            (user_id,),
+        ):
+            if row["text"]:
+                parts.append(str(row["text"]))
+    return "\n".join(parts)
+
+
+def global_member_profile(conn, user_id):
+    def count(table):
+        if not table_exists(conn, table):
+            return 0
+        return scalar(conn, f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,))
+
+    guild_ids = set()
+    for table in ("messages", "relationships", "user_profiles", "user_memories", "running_jokes", "achievements"):
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(f"SELECT DISTINCT guild_id FROM {table} WHERE user_id=?", (user_id,)):
+            if row[0] is not None:
+                guild_ids.add(row[0])
+
+    usernames = []
+    for table in ("messages", "relationships", "user_profiles"):
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(f"SELECT DISTINCT username FROM {table} WHERE user_id=? AND username IS NOT NULL AND username != '' LIMIT 10", (user_id,)):
+            if row[0] and row[0] not in usernames:
+                usernames.append(row[0])
+
+    base = {
+        "user_id": user_id,
+        "guild_count": len(guild_ids),
+        "guild_ids": sorted(guild_ids),
+        "usernames": usernames[:5],
+        "message_count": count("messages"),
+        "memory_count": count("user_memories"),
+        "joke_count": count("running_jokes"),
+        "achievement_count": count("achievements"),
+        "work_runs": scalar(conn, "SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE user_id=?", (user_id,)) if table_exists(conn, "crew_work_stats") else 0,
+        "ship_contributed": scalar(conn, "SELECT COALESCE(SUM(amount), 0) FROM ship_contributions WHERE user_id=?", (user_id,)) if table_exists(conn, "ship_contributions") else 0,
+    }
+    base["messages_analyzed"] = base["message_count"]
+    signal_text = global_member_signal_text(conn, user_id)
+    return {
+        "base": base,
+        "personality_type": infer_personality_type(signal_text, base),
+    }
+
+
 def attach_personality_types(conn, guild_id, members):
     for member in members:
         user_id = safe_int(member.get("user_id"))
@@ -291,7 +356,8 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
             COALESCE(cw.total_runs, 0) AS work_runs,
             COALESCE(cw.payout_total, 0) AS work_payout,
             COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
-            COALESCE(msg.message_count, 0) AS message_count
+            COALESCE(msg.message_count, 0) AS message_count,
+            COALESCE(gseen.guild_count, 0) AS global_guild_count
         FROM relationships r
         FULL OUTER JOIN user_profiles p
             ON p.guild_id = r.guild_id AND p.user_id = r.user_id
@@ -334,6 +400,11 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
             GROUP BY guild_id, user_id
         ) msg ON msg.guild_id = COALESCE(r.guild_id, p.guild_id)
             AND msg.user_id = COALESCE(r.user_id, p.user_id)
+        LEFT JOIN (
+            SELECT user_id, COUNT(DISTINCT guild_id) AS guild_count
+            FROM messages
+            GROUP BY user_id
+        ) gseen ON gseen.user_id = COALESCE(r.user_id, p.user_id)
         WHERE COALESCE(r.guild_id, p.guild_id, e.guild_id) = ?
         ORDER BY familiarity DESC, doubloons DESC, username COLLATE NOCASE
         LIMIT ?
@@ -365,7 +436,8 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                 COALESCE(cw.total_runs, 0) AS work_runs,
                 COALESCE(cw.payout_total, 0) AS work_payout,
                 COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
-                COALESCE(msg.message_count, 0) AS message_count
+                COALESCE(msg.message_count, 0) AS message_count,
+                COALESCE(gseen.guild_count, 0) AS global_guild_count
             FROM relationships r
             LEFT JOIN user_profiles p ON p.guild_id = r.guild_id AND p.user_id = r.user_id
             LEFT JOIN economy e ON e.guild_id = r.guild_id AND e.user_id = r.user_id
@@ -393,6 +465,10 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                 SELECT guild_id, user_id, COUNT(*) AS message_count
                 FROM messages GROUP BY guild_id, user_id
             ) msg ON msg.guild_id = r.guild_id AND msg.user_id = r.user_id
+            LEFT JOIN (
+                SELECT user_id, COUNT(DISTINCT guild_id) AS guild_count
+                FROM messages GROUP BY user_id
+            ) gseen ON gseen.user_id = r.user_id
             WHERE r.guild_id = ?
             ORDER BY familiarity DESC, doubloons DESC, username COLLATE NOCASE
             LIMIT ?
@@ -577,11 +653,13 @@ def member_payload(guild_id, user_id):
             collect_member_signal_text(conn, guild_id, user_id, base),
             base,
         )
+        global_profile = global_member_profile(conn, user_id)
 
         return {
             "guild_id": guild_id,
             "user_id": user_id,
             "personality_type": personality_type,
+            "global_profile": global_profile,
             "profile": profile,
             "relationship": relationship,
             "economy": economy,
@@ -781,7 +859,8 @@ function personalityCards(members) {
       <div>
         ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
         ${m.pronouns ? `<span class="pill">Pronouns: ${esc(m.pronouns)}</span>` : ''}
-        <span class="pill">${num(m.message_count)} lifetime messages</span>
+        <span class="pill">${num(m.message_count)} local messages</span>
+        <span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span>
         <span class="pill">${num(m.memory_count)} memories</span>
         <span class="pill">${num(m.joke_count)} jokes</span>
         <span class="pill">${num(m.achievement_count)} achievements</span>
@@ -799,7 +878,7 @@ function memberTable(members) {
       <td>${esc(m.relationship_type || '')}<br><span class="pill">Familiarity ${num(m.familiarity)}</span>${m.nickname ? `<span class="pill">${esc(m.nickname)}</span>` : ''}</td>
       <td><b>${esc((m.personality_type && m.personality_type.label) || 'Unclassified')}</b><br>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
       <td>${num(m.doubloons)}</td>
-      <td><span class="pill">${num(m.message_count)} lifetime messages</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
+      <td><span class="pill">${num(m.message_count)} local messages</span><span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -817,10 +896,13 @@ async function openMember(guildId, userId) {
   const profile = data.profile || {};
   const rel = data.relationship || {};
   const econ = data.economy || {};
+  const globalProfile = data.global_profile || {};
+  const globalBase = globalProfile.base || {};
   $('memberTitle').textContent = `${rel.username || profile.username || userId}`;
   $('memberBody').innerHTML = `
     <div class="grid">
-      <div class="card span-12"><h3>Generalized Personality Type</h3>${personalityBadge(data.personality_type)}<p class="muted">Built from the member’s full stored message history plus memories, jokes, relationship events, achievements, and crew activity.</p><pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
+      <div class="card span-12"><h3>Local Server Personality Type</h3>${personalityBadge(data.personality_type)}<p class="muted">Built from this server’s stored message history plus local memories, jokes, relationship events, achievements, and crew activity.</p><pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
+      <div class="card span-12"><h3>Cross-Server Identity Match</h3>${personalityBadge(globalProfile.personality_type)}<p class="muted">Same Discord user_id seen in ${num(globalBase.guild_count || 0)} server(s). Built from ${num(globalBase.message_count || 0)} stored messages across all servers. Server-specific gameplay, economy, permissions, and relationships remain separate.</p><pre>${esc(JSON.stringify(globalProfile || {}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Personality Memories</h3><div class="list">${data.memories.map(m => item(m.memory, `confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>

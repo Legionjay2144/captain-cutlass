@@ -68,6 +68,97 @@ async def _fetch_text_rows(db, sql, params):
     return [row[0] for row in rows if row and row[0]]
 
 
+async def build_global_crew_profile(user_id):
+    db = await get_db()
+
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT guild_id
+        FROM (
+            SELECT guild_id, user_id FROM messages
+            UNION SELECT guild_id, user_id FROM relationships
+            UNION SELECT guild_id, user_id FROM user_profiles
+            UNION SELECT guild_id, user_id FROM user_memories
+            UNION SELECT guild_id, user_id FROM running_jokes
+            UNION SELECT guild_id, user_id FROM achievements
+        )
+        WHERE user_id=?
+        ORDER BY guild_id
+        """,
+        (user_id,),
+    )
+    guild_rows = await cursor.fetchall()
+    guild_ids = [int(row[0]) for row in guild_rows if row and row[0] is not None]
+
+    cursor = await db.execute(
+        """
+        SELECT username
+        FROM (
+            SELECT username, MAX(timestamp) AS seen_at FROM messages WHERE user_id=? GROUP BY username
+            UNION ALL
+            SELECT username, MAX(updated_at) AS seen_at FROM user_profiles WHERE user_id=? GROUP BY username
+            UNION ALL
+            SELECT username, MAX(updated_at) AS seen_at FROM relationships WHERE user_id=? GROUP BY username
+        )
+        WHERE username IS NOT NULL AND username != ''
+        GROUP BY username
+        ORDER BY MAX(seen_at) DESC
+        LIMIT 5
+        """,
+        (user_id, user_id, user_id),
+    )
+    username_rows = await cursor.fetchall()
+    usernames = [row[0] for row in username_rows if row and row[0]]
+
+    signal_parts = []
+    text_queries = (
+        ("SELECT relationship_type || ' ' || COALESCE(nickname, '') || ' ' || COALESCE(opinion, '') FROM relationships WHERE user_id=? ORDER BY updated_at ASC", (user_id,)),
+        ("SELECT summary FROM user_profiles WHERE user_id=? AND summary IS NOT NULL AND summary != '' ORDER BY updated_at ASC", (user_id,)),
+        ("SELECT memory FROM user_memories WHERE user_id=? ORDER BY guild_id ASC, confidence DESC, id ASC", (user_id,)),
+        ("SELECT joke FROM running_jokes WHERE user_id=? ORDER BY guild_id ASC, id ASC", (user_id,)),
+        ("SELECT event FROM relationship_events WHERE user_id=? ORDER BY guild_id ASC, importance DESC, id ASC", (user_id,)),
+        ("SELECT achievement || CASE WHEN description IS NOT NULL AND description != '' THEN ': ' || description ELSE '' END FROM achievements WHERE user_id=? ORDER BY guild_id ASC, id ASC", (user_id,)),
+        ("SELECT content FROM messages WHERE user_id=? AND content IS NOT NULL AND content != '' ORDER BY id ASC", (user_id,)),
+    )
+
+    for sql, params in text_queries:
+        try:
+            cursor = await db.execute(sql, params)
+            rows = await cursor.fetchall()
+        except Exception:
+            rows = []
+        signal_parts.extend(str(row[0]) for row in rows if row and row[0])
+
+    async def count(sql):
+        try:
+            cursor = await db.execute(sql, (user_id,))
+            row = await cursor.fetchone()
+        except Exception:
+            return 0
+        return int(row[0] or 0) if row else 0
+
+    base = {
+        "user_id": user_id,
+        "guild_count": len(guild_ids),
+        "guild_ids": guild_ids,
+        "usernames": usernames,
+        "message_count": await count("SELECT COUNT(*) FROM messages WHERE user_id=?"),
+        "memory_count": await count("SELECT COUNT(*) FROM user_memories WHERE user_id=?"),
+        "joke_count": await count("SELECT COUNT(*) FROM running_jokes WHERE user_id=?"),
+        "achievement_count": await count("SELECT COUNT(*) FROM achievements WHERE user_id=?"),
+        "work_runs": await count("SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE user_id=?"),
+        "ship_contributed": await count("SELECT COALESCE(SUM(amount), 0) FROM ship_contributions WHERE user_id=?"),
+    }
+    base["messages_analyzed"] = base["message_count"]
+
+    signal_text = "\n".join(signal_parts)
+    return {
+        "base": base,
+        "personality_type": infer_personality_type(signal_text, base),
+        "crew_read": crew_read_label(signal_text, base),
+    }
+
+
 async def build_member_crew_read(guild_id, user_id):
     db = await get_db()
 
@@ -184,10 +275,13 @@ async def build_member_crew_read(guild_id, user_id):
     personality_type = infer_personality_type(signal_text, base)
     read_label = crew_read_label(signal_text, base)
 
+    global_profile = await build_global_crew_profile(user_id)
+
     return {
         "base": base,
         "personality_type": personality_type,
         "crew_read": read_label,
+        "global_profile": global_profile,
         "memories": memories,
         "jokes": jokes,
         "events": events,
@@ -219,8 +313,18 @@ def format_member_crew_read(target, data):
         "Personality type: **" + personality["label"] + "** (" + str(personality["confidence"]) + "% confidence)",
         "Traits: " + ", ".join(personality["traits"]),
         "Relationship: " + str(base.get("relationship_type") or "Unknown") + " | Familiarity: " + str(base.get("familiarity") or 0) + "/100",
-        "Signals: " + str(personality["signal_count"]) + " total signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
+        "Signals: " + str(personality["signal_count"]) + " local signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed in this server (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
     ]
+
+    global_profile = data.get("global_profile") or {}
+    global_base = global_profile.get("base") or {}
+    global_personality = global_profile.get("personality_type") or {}
+    if global_personality.get("label"):
+        lines.extend([
+            "",
+            "Cross-server profile: **" + str(global_personality.get("label")) + "** (" + str(global_personality.get("confidence", 0)) + "% confidence)",
+            "Seen in " + str(global_base.get("guild_count", 0)) + " server(s); analyzed " + str(global_base.get("message_count", 0)) + " stored messages, " + str(global_base.get("memory_count", 0)) + " memories, " + str(global_base.get("joke_count", 0)) + " jokes, " + str(global_base.get("achievement_count", 0)) + " achievements.",
+        ])
 
     if personality["secondary"]:
         lines.append("Blended with: " + ", ".join(personality["secondary"][:3]))
