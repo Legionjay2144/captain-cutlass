@@ -1767,6 +1767,13 @@ async function apiJson(path, payload, method='POST') { return await api(path, { 
 function card(title, body, cls='span-12') { return `<div class="card ${cls}"><h2>${esc(title)}</h2>${body}</div>`; }
 function stat(label, value) { return `<div class="stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`; }
 function item(text, meta='') { return `<div class="item">${esc(text)}${meta ? `<small>${esc(meta)}</small>` : ''}</div>`; }
+function togglePasswordField(inputId, button) {
+  const input = $(inputId);
+  if (!input) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  if (button) button.textContent = showing ? 'Show' : 'Hide';
+}
 function searchTextFor(value) {
   try { return JSON.stringify(value || {}).toLowerCase(); }
   catch { return String(value || '').toLowerCase(); }
@@ -2225,6 +2232,7 @@ async function openAdminUsers() {
       <div class="toolbar">
         <input id="newDashUser" placeholder="username">
         <input id="newDashPass" type="password" placeholder="password">
+        <button type="button" onclick="togglePasswordField('newDashPass', this)">Show</button>
         <select id="newDashRole"><option value="user">User</option><option value="admin">Admin</option></select>
         <select id="newDashScope" onchange="toggleNewUserAccessPicker()"><option value="global">Global only</option><option value="all">All access</option><option value="selected">Selected servers</option></select>
         <button type="button" onclick="createDashboardUserFromForm()">Create</button>
@@ -2309,6 +2317,7 @@ function dashboardUsersTable(users) {
         <div id="${prefix}_box" class="access-grid" data-loaded="0"><p class="muted">Server list hidden until Edit Servers is clicked.</p></div>
         <div class="admin-actions">
           <input id="${prefix}_password" type="password" placeholder="new password" size="14">
+          <button type="button" onclick="togglePasswordField('${prefix}_password', this)">Show</button>
           <button type="button" onclick="resetDashboardPassword('${esc(u.username)}','${prefix}')">Reset Password</button>
           <button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete User</button>
         </div>
@@ -2368,7 +2377,9 @@ function openAccountSettings() {
       ${canChangePassword ? `
         <div class="toolbar">
           <input id="accountCurrentPassword" type="password" placeholder="current password">
+          <button type="button" onclick="togglePasswordField('accountCurrentPassword', this)">Show</button>
           <input id="accountNewPassword" type="password" placeholder="new password">
+          <button type="button" onclick="togglePasswordField('accountNewPassword', this)">Show</button>
           <button type="button" onclick="changeOwnPassword()">Change Password</button>
         </div>
         <p class="muted">New passwords must be at least 8 characters.</p>
