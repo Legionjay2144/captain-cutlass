@@ -448,11 +448,19 @@ const $ = id => document.getElementById(id);
 let overview = null;
 let guild = null;
 let selectedGuild = null;
+const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
+if (dashboardToken) localStorage.setItem('cutlassDashboardToken', dashboardToken);
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function num(value) { return Number(value || 0).toLocaleString(); }
 function pct(value, max=100) { const n = Math.max(0, Math.min(100, Number(value || 0) / max * 100)); return n.toFixed(0); }
-async function api(path) { const res = await fetch(path); if (!res.ok) throw new Error(await res.text()); return await res.json(); }
+function withToken(path) {
+  if (!dashboardToken) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('token', dashboardToken);
+  return url.pathname + url.search;
+}
+async function api(path) { const res = await fetch(withToken(path)); if (!res.ok) throw new Error(await res.text()); return await res.json(); }
 function card(title, body, cls='span-12') { return `<div class="card ${cls}"><h2>${esc(title)}</h2>${body}</div>`; }
 function stat(label, value) { return `<div class="stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`; }
 function item(text, meta='') { return `<div class="item">${esc(text)}${meta ? `<small>${esc(meta)}</small>` : ''}</div>`; }
