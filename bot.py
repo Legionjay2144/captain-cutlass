@@ -288,6 +288,12 @@ OPENAI_MODEL = os.getenv(
     "gpt-5-nano"
 )
 
+OPENAI_RESPONSE_OPTIONS = (
+    {"reasoning": {"effort": os.getenv("OPENAI_REASONING_EFFORT", "minimal")}}
+    if OPENAI_MODEL.startswith("gpt-5")
+    else {}
+)
+
 
 CREATOR_USER_ID = int(
     os.getenv(
@@ -1065,6 +1071,7 @@ return NONE.
             input=prompt,
             max_output_tokens=300,
             store=False,
+            **OPENAI_RESPONSE_OPTIONS,
             text={
                 "format": {
                     "type": "json_schema",
@@ -1154,6 +1161,89 @@ def captain_mood_instructions(mood):
         )
     )
 
+
+
+async def build_plain_conversation_fallback(
+    message,
+    conversation,
+    member_context,
+    world_context,
+    gameplay_context,
+    captain_mood="neutral",
+    force_reply=False
+):
+    prompt = f"""{PERSONALITY}
+
+Captain Cutlass needs to answer a Discord message.
+The strict structured brain failed, so give a plain text reply only.
+
+MOOD:
+{captain_mood_instructions(captain_mood)}
+
+RECENT CONVERSATION:
+{conversation}
+
+MEMBER CONTEXT:
+{member_context}
+
+WORLD CONTEXT:
+{world_context}
+
+GAMEPLAY CONTEXT:
+{gameplay_context}
+
+MEMBER MESSAGE:
+{message.content[:1200]}
+
+Rules:
+- Reply directly to the member's latest message.
+- Keep it concise, usually 1-2 sentences.
+- Stay in Captain Cutlass's pirate voice.
+- Do not invent commands, private facts, genders, pronouns, or gameplay records.
+- Return only the reply text.
+"""
+    try:
+        response = await ai.responses.create(
+            model=OPENAI_MODEL,
+            input=prompt,
+            max_output_tokens=300,
+            store=False,
+            **OPENAI_RESPONSE_OPTIONS
+        )
+        reply = response.output_text.strip()
+        if reply:
+            return {
+                "respond": True,
+                "memory": None,
+                "relationship": None,
+                "opinion": None,
+                "nickname": None,
+                "joke": None,
+                "event": None,
+                "server_lore": None,
+                "lore": None,
+                "reply": reply,
+                "suppress_parrot_banter": True
+            }
+    except Exception as error:
+        print("Plain conversation fallback error:", repr(error))
+
+    if force_reply:
+        return {
+            "respond": True,
+            "memory": None,
+            "relationship": None,
+            "opinion": None,
+            "nickname": None,
+            "joke": None,
+            "event": None,
+            "server_lore": None,
+            "lore": None,
+            "reply": "Aye, I hear ye, matey. Me fancy brain hit a reef, but I’m still aboard.",
+            "suppress_parrot_banter": True
+        }
+
+    return None
 
 
 async def analyze_message(
@@ -1353,7 +1443,8 @@ Return ONLY the story.
                 model=OPENAI_MODEL,
                 input=story_prompt,
                 max_output_tokens=350,
-                store=False
+                store=False,
+                **OPENAI_RESPONSE_OPTIONS
             )
 
             story_reply = (
@@ -1647,6 +1738,7 @@ Return ONLY Captain's response.
                 input=direct_prompt,
                 max_output_tokens=220,
                 store=False,
+                **OPENAI_RESPONSE_OPTIONS,
                 text={
                     "format": {
                         "type": "json_schema",
@@ -1744,7 +1836,8 @@ Return ONLY Captain Cutlass's response.
                 model=OPENAI_MODEL,
                 input=hypothetical_prompt,
                 max_output_tokens=180,
-                store=False
+                store=False,
+                **OPENAI_RESPONSE_OPTIONS
             )
 
             hypothetical_reply = response.output_text.strip()
@@ -1866,7 +1959,8 @@ Return ONLY Captain Cutlass's joke.
                 model=OPENAI_MODEL,
                 input=targeted_joke_prompt,
                 max_output_tokens=140,
-                store=False
+                store=False,
+                **OPENAI_RESPONSE_OPTIONS
             )
 
             targeted_joke_reply = (
@@ -1940,7 +2034,8 @@ Return ONLY Captain's response.
                 model=OPENAI_MODEL,
                 input=humor_prompt,
                 max_output_tokens=140,
-                store=False
+                store=False,
+                **OPENAI_RESPONSE_OPTIONS
             )
 
             humor_reply = response.output_text.strip()
@@ -2005,7 +2100,8 @@ Return ONLY Captain's response.
                 model=OPENAI_MODEL,
                 input=joke_prompt,
                 max_output_tokens=120,
-                store=False
+                store=False,
+                **OPENAI_RESPONSE_OPTIONS
             )
 
             joke_reply = response.output_text.strip()
@@ -2833,6 +2929,8 @@ If mode=punbattle, return Captain's next pirate-themed pun.
 
             store=False,
 
+            **OPENAI_RESPONSE_OPTIONS,
+
             text={
                 "format": {
 
@@ -2870,7 +2968,15 @@ If mode=punbattle, return Captain's next pirate-themed pun.
             repr(error)
         )
 
-        return None
+        return await build_plain_conversation_fallback(
+            message,
+            conversation,
+            member_context,
+            world_context,
+            gameplay_context,
+            captain_mood=captain_mood,
+            force_reply=force_reply
+        )
 
 
 def clean_brain_value(
@@ -4505,7 +4611,7 @@ LOG ENTRIES:
 {source}
 """
     try:
-        response = await ai.responses.create(model=OPENAI_MODEL, input=prompt, max_output_tokens=500, store=False)
+        response = await ai.responses.create(model=OPENAI_MODEL, input=prompt, max_output_tokens=500, store=False, **OPENAI_RESPONSE_OPTIONS)
         chronicle = response.output_text.strip()
     except Exception as error:
         print("Chronicle generation error:", repr(error))
@@ -5539,7 +5645,8 @@ The parrot mocked Barnacle's navigation skills.
             model=OPENAI_MODEL,
             input=prompt,
             max_output_tokens=80,
-            store=False
+            store=False,
+            **OPENAI_RESPONSE_OPTIONS
         )
 
         summary = response.output_text.strip()
@@ -5735,7 +5842,8 @@ Return ONLY the parrot's response.
             model=OPENAI_MODEL,
             input=prompt,
             max_output_tokens=120,
-            store=False
+            store=False,
+            **OPENAI_RESPONSE_OPTIONS
         )
 
         reply = response.output_text.strip()
@@ -6313,7 +6421,8 @@ IDENTITY RULES:
             model=OPENAI_MODEL,
             input=safety_prompt,
             max_output_tokens=350,
-            store=False
+            store=False,
+            **OPENAI_RESPONSE_OPTIONS
         )
 
         corrected = (
