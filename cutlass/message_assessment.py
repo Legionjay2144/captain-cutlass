@@ -106,16 +106,16 @@ def assess_message(content: str) -> dict:
 
     if negative_score >= positive_score + 2 and negative_score >= 2:
         sentiment = "concern"
-        assessment = "Concern signal in imported chat"
+        assessment = "Concern signal in stored chat"
     elif positive_score >= negative_score + 2 and positive_score >= 2:
         sentiment = "positive"
-        assessment = "Positive/useful signal in imported chat"
+        assessment = "Positive/useful signal in stored chat"
     elif positive_score or negative_score:
         sentiment = "mixed"
-        assessment = "Mixed or context-dependent imported chat signal"
+        assessment = "Mixed or context-dependent stored chat signal"
     else:
         sentiment = "neutral"
-        assessment = "Neutral/limited imported chat signal"
+        assessment = "Neutral/limited stored chat signal"
 
     return {
         "sentiment": sentiment,
@@ -150,7 +150,10 @@ def aggregate_assessments(rows: list[dict]) -> dict[tuple[int, int], dict]:
         bucket["positive_score"] += int(row.get("positive_score") or 0)
         bucket["negative_score"] += int(row.get("negative_score") or 0)
         bucket["username"] = row.get("username") or bucket["username"]
-        for tag in row.get("tags") or []:
+        raw_tags = row.get("tags") or []
+        if isinstance(raw_tags, str):
+            raw_tags = parse_tags(raw_tags)
+        for tag in raw_tags:
             bucket["tags"][tag] += 1
         if sentiment in {"positive", "concern", "mixed"} and len(bucket["examples"]) < 4:
             bucket["examples"].append(row.get("excerpt") or "")
@@ -196,11 +199,11 @@ def assessment_summary(bucket: dict) -> str:
     tags = [tag for tag, _ in bucket.get("tags", Counter()).most_common(5)]
     tag_text = ", ".join(tags) if tags else "no strong repeated tags"
     return (
-        "Imported-history assessment: "
+        "Stored-message assessment: "
         + label
         + ". Signals from "
         + str(total)
-        + " imported message(s): "
+        + " stored message(s): "
         + str(positive)
         + " positive, "
         + str(mixed)

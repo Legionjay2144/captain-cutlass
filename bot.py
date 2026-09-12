@@ -46,6 +46,7 @@ from cutlass.commands.tickle import (
     perform_tickle,
     is_natural_tickle_message,
 )
+from cutlass.message_assessment_ai import assess_messages_async
 from cutlass.intent import (
     detect_direct_question_mode,
     detect_humor_mode,
@@ -667,6 +668,30 @@ def familiarity_ready(
     ] = now
 
     return True
+
+
+async def assess_saved_human_message(message, message_id):
+    if not message_id:
+        return
+
+    try:
+        assessments = await assess_messages_async([
+            {
+                "id": message_id,
+                "content": message.content,
+            }
+        ])
+        assessment = assessments.get(int(message_id))
+        await save_message_assessment(
+            message_id,
+            message.guild.id,
+            message.channel.id,
+            message.author.id,
+            message.author.display_name,
+            assessment,
+        )
+    except Exception:
+        return
 
 
 def is_admin(
@@ -6579,7 +6604,7 @@ async def on_message(
 
 
         if not conversation_allowed:
-            await save_message(
+            stored_message_id = await save_message(
                 message.guild.id,
                 message.channel.id,
                 message.author.id,
@@ -6587,6 +6612,12 @@ async def on_message(
                 message.content,
                 discord_message_id=message.id,
                 timestamp=message.created_at.isoformat()
+            )
+            asyncio.create_task(
+                assess_saved_human_message(
+                    message,
+                    stored_message_id
+                )
             )
             return
 
@@ -6621,6 +6652,12 @@ async def on_message(
             message.content,
             discord_message_id=message.id,
             timestamp=message.created_at.isoformat()
+        )
+        asyncio.create_task(
+            assess_saved_human_message(
+                message,
+                conversation_message_id
+            )
         )
 
         await maybe_parrot_spontaneous(

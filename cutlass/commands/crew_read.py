@@ -352,7 +352,7 @@ def format_member_crew_read(target, data):
         "Personality type: **" + personality["label"] + "** (" + str(personality["confidence"]) + "% confidence)",
         "Traits: " + ", ".join(personality["traits"]),
         "Relationship: " + str(base.get("relationship_type") or "Unknown") + " | Familiarity: " + str(base.get("familiarity") or 0) + "/100",
-        "Signals: " + str(personality["signal_count"]) + " local signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed in this server (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("assessed_messages", 0)) + " imported messages assessed, " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
+        "Signals: " + str(personality["signal_count"]) + " local signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed in this server (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("assessed_messages", 0)) + " stored messages assessed, " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
     ]
 
     global_profile = data.get("global_profile") or {}

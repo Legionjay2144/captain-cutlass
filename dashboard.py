@@ -11,7 +11,11 @@ import time
 from http import cookies
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock, Thread
 from urllib.parse import parse_qs, urlparse
+
+from cutlass.message_assessment import aggregate_assessments, assessment_summary, user_assessment_label
+from cutlass.message_assessment_ai import ASSESSMENT_BATCH_SIZE, assess_messages_sync, assessment_status
 
 DB_PATH = os.getenv("DATABASE_PATH", "/app/data/captain.db")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
@@ -37,6 +41,17 @@ PASSWORD_HASH_ITERATIONS = 260000
 
 TEXT_LIMIT = 500
 LIST_LIMIT = 200
+
+ASSESSMENT_SWEEP_LOCK = Lock()
+ASSESSMENT_SWEEP_STATUS = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "processed": 0,
+    "total": 0,
+    "users_updated": 0,
+    "error": "",
+}
 
 
 def db_connect():
@@ -66,6 +81,260 @@ def table_exists(conn, table):
 
 def column_exists_sync(conn, table, column):
     return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def ensure_assessment_schema(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS message_assessments (
+            message_id INTEGER PRIMARY KEY,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            source TEXT DEFAULT 'import',
+            sentiment TEXT DEFAULT 'neutral',
+            assessment TEXT DEFAULT '',
+            positive_score INTEGER DEFAULT 0,
+            negative_score INTEGER DEFAULT 0,
+            tags TEXT DEFAULT '',
+            excerpt TEXT DEFAULT '',
+            assessed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_message_assessments_user
+        ON message_assessments (guild_id, user_id, sentiment)
+    """)
+
+
+def strip_import_assessment(text):
+    text = str(text or "").strip()
+    for marker in ("Stored-message assessment:", "Imported-history assessment:"):
+        if marker in text:
+            return text.split(marker, 1)[0].strip().rstrip("|").strip()
+    return text
+
+
+def update_assessment_summaries(conn):
+    assessment_rows = rows(
+        conn,
+        """
+        SELECT guild_id, user_id, username, sentiment, assessment,
+               positive_score, negative_score, tags, excerpt
+        FROM message_assessments
+        ORDER BY message_id ASC
+        """,
+    )
+    aggregates = aggregate_assessments(assessment_rows)
+    users_updated = 0
+
+    for (guild_id, user_id), bucket in aggregates.items():
+        summary = assessment_summary(bucket)
+        label = user_assessment_label(bucket)
+        username = bucket.get("username") or str(user_id)
+        existing = conn.execute(
+            "SELECT summary FROM user_profiles WHERE guild_id=? AND user_id=?",
+            (guild_id, user_id),
+        ).fetchone()
+        previous = strip_import_assessment(existing["summary"] if existing else "")
+        new_summary = (previous + " | " + summary).strip(" |") if previous else summary
+        conn.execute(
+            """
+            INSERT INTO user_profiles (guild_id, user_id, username, summary)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                username=excluded.username,
+                summary=excluded.summary,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (guild_id, user_id, username, new_summary[:900]),
+        )
+
+        relationship = conn.execute(
+            "SELECT opinion FROM relationships WHERE guild_id=? AND user_id=?",
+            (guild_id, user_id),
+        ).fetchone()
+        previous_opinion = strip_import_assessment(relationship["opinion"] if relationship else "")
+        opinion_line = (
+            "Stored-message assessment: "
+            + label
+            + " based on observed stored chat patterns."
+        )
+        new_opinion = (
+            (previous_opinion + " | " + opinion_line).strip(" |")
+            if previous_opinion
+            else opinion_line
+        )
+        conn.execute(
+            """
+            INSERT INTO relationships (guild_id, user_id, username, opinion)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                username=excluded.username,
+                opinion=excluded.opinion,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (guild_id, user_id, username, new_opinion[:500]),
+        )
+
+        event = (
+            "Stored-message assessment completed: "
+            + label
+            + " from "
+            + str(bucket.get("total") or 0)
+            + " stored message(s)."
+        )
+        exists = conn.execute(
+            """
+            SELECT 1 FROM relationship_events
+            WHERE guild_id=? AND user_id=? AND event=?
+            LIMIT 1
+            """,
+            (guild_id, user_id, event),
+        ).fetchone()
+        if not exists:
+            importance = 6 if ("Concern" in label or "Mixed" in label) else 4
+            conn.execute(
+                """
+                INSERT INTO relationship_events (guild_id, user_id, event, importance)
+                VALUES (?, ?, ?, ?)
+                """,
+                (guild_id, user_id, event, importance),
+            )
+        users_updated += 1
+
+    return users_updated
+
+
+def assessment_sweep_status_payload():
+    with ASSESSMENT_SWEEP_LOCK:
+        status = dict(ASSESSMENT_SWEEP_STATUS)
+    status["config"] = assessment_status()
+    return status
+
+
+def run_assessment_sweep():
+    try:
+        with db_write_connect() as conn:
+            ensure_assessment_schema(conn)
+            total = scalar(
+                conn,
+                """
+                SELECT COUNT(*) FROM messages
+                WHERE content IS NOT NULL
+                  AND content != ''
+                  AND LOWER(COALESCE(username, '')) NOT LIKE 'captain-cutlass%'
+                  AND LOWER(COALESCE(username, '')) != 'captain cutlass'
+                """,
+            )
+            with ASSESSMENT_SWEEP_LOCK:
+                ASSESSMENT_SWEEP_STATUS.update({
+                    "running": True,
+                    "started_at": int(time.time()),
+                    "finished_at": None,
+                    "processed": 0,
+                    "total": int(total or 0),
+                    "users_updated": 0,
+                    "error": "",
+                })
+
+            offset = 0
+            batch_size = ASSESSMENT_BATCH_SIZE
+            while True:
+                batch = rows(
+                    conn,
+                    """
+                    SELECT id, guild_id, channel_id, user_id, username, content
+                    FROM messages
+                    WHERE content IS NOT NULL
+                      AND content != ''
+                      AND LOWER(COALESCE(username, '')) NOT LIKE 'captain-cutlass%'
+                      AND LOWER(COALESCE(username, '')) != 'captain cutlass'
+                    ORDER BY id ASC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (batch_size, offset),
+                )
+                if not batch:
+                    break
+
+                assessments = assess_messages_sync(batch)
+                for message in batch:
+                    assessment = assessments.get(int(message["id"]))
+                    if not assessment:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO message_assessments (
+                            message_id, guild_id, channel_id, user_id, username,
+                            source, sentiment, assessment, positive_score,
+                            negative_score, tags, excerpt, assessed_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, 'import', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(message_id) DO UPDATE SET
+                            username=excluded.username,
+                            sentiment=excluded.sentiment,
+                            assessment=excluded.assessment,
+                            positive_score=excluded.positive_score,
+                            negative_score=excluded.negative_score,
+                            tags=excluded.tags,
+                            excerpt=excluded.excerpt,
+                            assessed_at=CURRENT_TIMESTAMP
+                        """,
+                        (
+                            message["id"],
+                            message["guild_id"],
+                            message["channel_id"],
+                            message["user_id"],
+                            message["username"],
+                            assessment.get("sentiment", "neutral"),
+                            assessment.get("assessment", ""),
+                            int(assessment.get("positive_score") or 0),
+                            int(assessment.get("negative_score") or 0),
+                            assessment.get("tags", ""),
+                            assessment.get("excerpt", ""),
+                        ),
+                    )
+                conn.commit()
+                offset += len(batch)
+                with ASSESSMENT_SWEEP_LOCK:
+                    ASSESSMENT_SWEEP_STATUS["processed"] = offset
+
+            users_updated = update_assessment_summaries(conn)
+            conn.commit()
+            with ASSESSMENT_SWEEP_LOCK:
+                ASSESSMENT_SWEEP_STATUS.update({
+                    "running": False,
+                    "finished_at": int(time.time()),
+                    "processed": int(total or 0),
+                    "users_updated": users_updated,
+                    "error": "",
+                })
+    except Exception as exc:
+        with ASSESSMENT_SWEEP_LOCK:
+            ASSESSMENT_SWEEP_STATUS.update({
+                "running": False,
+                "finished_at": int(time.time()),
+                "error": repr(exc),
+            })
+
+
+def start_assessment_sweep():
+    with ASSESSMENT_SWEEP_LOCK:
+        if ASSESSMENT_SWEEP_STATUS.get("running"):
+            return False
+        ASSESSMENT_SWEEP_STATUS.update({
+            "running": True,
+            "started_at": int(time.time()),
+            "finished_at": None,
+            "processed": 0,
+            "total": 0,
+            "users_updated": 0,
+            "error": "",
+        })
+    thread = Thread(target=run_assessment_sweep, name="cutlass-assessment-sweep", daemon=True)
+    thread.start()
+    return True
 
 
 def rows(conn, sql, params=()):
@@ -1448,6 +1717,8 @@ const $ = id => document.getElementById(id);
 let overview = null;
 let guild = null;
 let globalData = null;
+let sessionUser = null;
+let assessmentStatus = null;
 let selectedGuild = null;
 let currentView = 'server';
 const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
@@ -1471,7 +1742,8 @@ function item(text, meta='') { return `<div class="item">${esc(text)}${meta ? `<
 async function loadOverview() {
   $('status').textContent = 'Loading…';
   const session = await api('/api/session');
-  if (session.user && session.user.role === 'admin') $('adminBtn').style.display = '';
+  sessionUser = session.user || null;
+  if (sessionUser && sessionUser.role === 'admin') $('adminBtn').style.display = '';
   overview = await api('/api/overview');
   const select = $('guildSelect');
   const globalOption = overview.can_view_global ? `<option value="__global__">Global Info — all servers and matched users</option>` : '';
@@ -1500,8 +1772,14 @@ async function loadGlobal() {
   currentView = 'global';
   selectedGuild = '__global__';
   $('status').textContent = 'Loading global info…';
-  globalData = await api('/api/global');
+  const loaded = await Promise.all([
+    api('/api/global'),
+    api('/api/admin/assessment/status').catch(() => null),
+  ]);
+  globalData = loaded[0];
+  assessmentStatus = loaded[1];
   renderGlobal();
+  refreshAssessmentStatus().catch(() => {});
   $('status').textContent = 'Loaded global info';
 }
 
@@ -1524,10 +1802,50 @@ function renderGlobal() {
       </div>
       <p class="muted">Global profiles are matched by Discord user_id. Server-specific relationships, permissions, economy, and gameplay stay separate.</p>
     `, 'span-12')}
+    ${card('AI Message Assessment', assessmentPanel(assessmentStatus), 'span-12')}
     ${card('History Import Status', importStatusPanel(globalData.history_import_summary, globalData.history_imports, true), 'span-12')}
     ${card('Multi-Server Users', globalUserCards(globalData.multi_server_users || []), 'span-12')}
     ${card('Global Crew Profiles', globalUserTable(users), 'span-12')}
   `;
+}
+
+function assessmentPanel(status) {
+  status = status || {};
+  const cfg = status.config || {};
+  const progress = Number(status.total || 0) ? `${num(status.processed || 0)} / ${num(status.total || 0)}` : num(status.processed || 0);
+  const canStart = sessionUser && sessionUser.role === 'admin';
+  const provider = cfg.provider || 'rules';
+  const configured = cfg.openai_configured ? 'OpenAI key present' : 'OpenAI key missing';
+  return `
+    <div class="stats">
+      ${stat('Provider', provider)}
+      ${stat('Model', cfg.model || 'unset')}
+      ${stat('OpenAI', configured)}
+      ${stat('Running', status.running ? 'Yes' : 'No')}
+      ${stat('Processed', progress)}
+      ${stat('Users Updated', status.users_updated || 0)}
+    </div>
+    <p class="muted">When MESSAGE_ASSESSMENT_PROVIDER=openai and OPENAI_API_KEY are set in the dashboard environment, sweeps use OpenAI. If OpenAI is unavailable, Cutlass falls back to the deterministic rules.</p>
+    ${status.error ? `<p class="muted red">Last error: ${esc(status.error)}</p>` : ''}
+    ${canStart ? `<button type="button" onclick="startAssessmentSweep()" ${status.running ? 'disabled' : ''}>Run Full All-Server Assessment Sweep</button>` : '<p class="muted">Admin access is required to start a sweep.</p>'}
+  `;
+}
+
+async function startAssessmentSweep() {
+  $('status').textContent = 'Starting assessment sweep…';
+  assessmentStatus = await apiJson('/api/admin/assessment/sweep', {}).then(r => r.status);
+  renderGlobal();
+  refreshAssessmentStatus().catch(() => {});
+  $('status').textContent = assessmentStatus.running ? 'Assessment sweep running…' : 'Assessment sweep queued';
+}
+
+async function refreshAssessmentStatus() {
+  if (currentView !== 'global') return;
+  assessmentStatus = await api('/api/admin/assessment/status').catch(() => assessmentStatus);
+  if (assessmentStatus && assessmentStatus.running) {
+    renderGlobal();
+    setTimeout(() => refreshAssessmentStatus().catch(() => {}), 3000);
+  }
 }
 
 function filterGlobalUsers(users) {
@@ -1804,7 +2122,7 @@ async function openMember(guildId, userId) {
   $('memberBody').innerHTML = `
     <div class="grid">
       <div class="card span-12"><h3>Local Server Personality Type</h3>${personalityBadge(data.personality_type)}<p class="muted">Built from this server’s stored message history plus local memories, jokes, relationship events, achievements, and crew activity.</p><pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
-      <div class="card span-12"><h3>Imported Message Assessment</h3><div class="stats">${stat('Assessed', assess.assessed_messages || 0)}${stat('Positive', assess.positive_messages || 0)}${stat('Mixed', assess.mixed_messages || 0)}${stat('Concern', assess.concern_messages || 0)}${stat('Neutral', assess.neutral_messages || 0)}</div><p class="muted">These are observed chat-pattern signals from imported messages, not moral verdicts or diagnoses.</p>${simpleRows(data.message_assessments, ['sentiment','assessment','positive_score','negative_score','tags','excerpt'])}</div>
+      <div class="card span-12"><h3>Stored Message Assessment</h3><div class="stats">${stat('Assessed', assess.assessed_messages || 0)}${stat('Positive', assess.positive_messages || 0)}${stat('Mixed', assess.mixed_messages || 0)}${stat('Concern', assess.concern_messages || 0)}${stat('Neutral', assess.neutral_messages || 0)}</div><p class="muted">These are observed chat-pattern signals from stored messages, not moral verdicts or diagnoses.</p>${simpleRows(data.message_assessments, ['sentiment','assessment','positive_score','negative_score','tags','excerpt'])}</div>
       <div class="card span-12"><h3>Cross-Server Identity Match</h3>${personalityBadge(globalProfile.personality_type)}<p class="muted">Same Discord user_id seen in ${num(globalBase.guild_count || 0)} server(s). Built from ${num(globalBase.message_count || 0)} stored messages across all servers. Server-specific gameplay, economy, permissions, and relationships remain separate.</p><pre>${esc(JSON.stringify(globalProfile || {}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
@@ -2135,6 +2453,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
                 self.send_json({"users": dashboard_public_users(), "options": dashboard_access_options_payload()})
                 return
+            if path == "/api/admin/assessment/status":
+                if not require_dashboard_access(self.access_user(), global_required=True):
+                    self.send_json({"error": "global access required"}, 403)
+                    return
+                self.send_json(assessment_sweep_status_payload())
+                return
             if path == "/api/overview":
                 self.send_json(overview_payload(self.access_user()))
                 return
@@ -2215,6 +2539,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 400)
                 return
             self.send_json({"user": user, "users": dashboard_public_users()}, 201)
+            return
+
+        if path == "/api/admin/assessment/sweep":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            started = start_assessment_sweep()
+            self.send_json({"started": started, "status": assessment_sweep_status_payload()})
             return
 
         if path == "/api/admin/control":

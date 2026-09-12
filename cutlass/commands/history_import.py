@@ -4,7 +4,7 @@ import re
 import discord
 
 from features import milestone_for_familiarity, relationship_for_familiarity
-from cutlass.message_assessment import assess_message, tags_json
+from cutlass.message_assessment_ai import assess_messages_async
 
 _ACTIVE_IMPORTS = {}
 _STOP_REQUESTS = set()
@@ -280,6 +280,7 @@ async def _import_channel_history(
             batch_imported = 0
             batch_scanned = 0
             imported_by_user = {}
+            pending_assessments = []
             for historic_message in batch:
                 last_seen_id = historic_message.id
                 batch_scanned += 1
@@ -321,21 +322,32 @@ async def _import_channel_history(
                     imported=True,
                 )
                 if inserted_id:
-                    assessment = assess_message(content)
-                    assessment["tags"] = tags_json(assessment.get("tags"))
-                    await save_message_assessment(
-                        inserted_id,
-                        target_channel.guild.id,
-                        target_channel.id,
-                        historic_message.author.id,
-                        historic_message.author.display_name,
-                        assessment,
-                    )
+                    pending_assessments.append({
+                        "id": inserted_id,
+                        "content": content,
+                        "guild_id": target_channel.guild.id,
+                        "channel_id": target_channel.id,
+                        "user_id": historic_message.author.id,
+                        "username": historic_message.author.display_name,
+                    })
                     imported += 1
                     batch_imported += 1
                     imported_by_user[historic_message.author.id] = (
                         imported_by_user.get(historic_message.author.id, 0)
                         + 1
+                    )
+
+            if pending_assessments:
+                assessments = await assess_messages_async(pending_assessments)
+                for item in pending_assessments:
+                    assessment = assessments.get(int(item["id"]))
+                    await save_message_assessment(
+                        item["id"],
+                        item["guild_id"],
+                        item["channel_id"],
+                        item["user_id"],
+                        item["username"],
+                        assessment,
                     )
 
             await _apply_import_familiarity(
