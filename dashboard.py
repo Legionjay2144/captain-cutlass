@@ -103,6 +103,7 @@ def collect_member_signal_text(conn, guild_id, user_id, base=None):
         ("running_jokes", "joke", "ORDER BY id DESC LIMIT 5"),
         ("relationship_events", "event", "ORDER BY importance DESC, id DESC LIMIT 6"),
         ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY id DESC LIMIT 8"),
+        ("messages", "content", "ORDER BY id DESC LIMIT 80"),
     )
 
     for table, column, order in signal_queries:
@@ -141,6 +142,7 @@ def infer_personality_type(signal_text, base=None):
     work_runs = safe_int(base.get("work_runs"), 0)
     ship_contributed = safe_int(base.get("ship_contributed"), 0)
     achievement_count = safe_int(base.get("achievement_count"), 0)
+    message_count = safe_int(base.get("message_count"), 0)
 
     if familiarity >= 75:
         scores["Loyal Deckhand"] += 2
@@ -152,6 +154,10 @@ def infer_personality_type(signal_text, base=None):
         scores["Loyal Deckhand"] += 2
     if achievement_count >= 5:
         scores["Treasure-Seeker"] += 1
+    if message_count >= 50:
+        scores["Loyal Deckhand"] += 1
+    if message_count >= 150:
+        scores["Lorekeeper"] += 1
 
     best_name, best_score = max(scores.items(), key=lambda item: item[1])
     if best_score <= 0:
@@ -160,7 +166,7 @@ def infer_personality_type(signal_text, base=None):
 
     sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
     secondary = [name for name, score in sorted_scores[1:4] if score > 0]
-    confidence = min(95, 25 + (best_score * 7) + min(20, memory_count + joke_count + achievement_count))
+    confidence = min(95, 25 + (best_score * 7) + min(20, memory_count + joke_count + achievement_count + (message_count // 25)))
     traits = list(PERSONALITY_ARCHETYPES[best_name]["traits"])
     if secondary:
         traits.extend(PERSONALITY_ARCHETYPES[secondary[0]]["traits"][:2])
@@ -256,6 +262,7 @@ def dashboard_counts(conn, guild_id):
         "discoveries": count("world_discoveries"),
         "world_history": count("world_history"),
         "crew_work_runs": count("crew_work_runs"),
+        "messages": count("messages"),
         "captured_ships": count("captured_ships"),
     }
 
@@ -283,7 +290,8 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
             COALESCE(j.joke_count, 0) AS joke_count,
             COALESCE(cw.total_runs, 0) AS work_runs,
             COALESCE(cw.payout_total, 0) AS work_payout,
-            COALESCE(cw.repair_hull_total, 0) AS repair_hull_total
+            COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
+            COALESCE(msg.message_count, 0) AS message_count
         FROM relationships r
         FULL OUTER JOIN user_profiles p
             ON p.guild_id = r.guild_id AND p.user_id = r.user_id
@@ -320,6 +328,12 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
             GROUP BY guild_id, user_id
         ) cw ON cw.guild_id = COALESCE(r.guild_id, p.guild_id)
             AND cw.user_id = COALESCE(r.user_id, p.user_id)
+        LEFT JOIN (
+            SELECT guild_id, user_id, COUNT(*) AS message_count
+            FROM messages
+            GROUP BY guild_id, user_id
+        ) msg ON msg.guild_id = COALESCE(r.guild_id, p.guild_id)
+            AND msg.user_id = COALESCE(r.user_id, p.user_id)
         WHERE COALESCE(r.guild_id, p.guild_id, e.guild_id) = ?
         ORDER BY familiarity DESC, doubloons DESC, username COLLATE NOCASE
         LIMIT ?
@@ -350,7 +364,8 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                 COALESCE(j.joke_count, 0) AS joke_count,
                 COALESCE(cw.total_runs, 0) AS work_runs,
                 COALESCE(cw.payout_total, 0) AS work_payout,
-                COALESCE(cw.repair_hull_total, 0) AS repair_hull_total
+                COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
+                COALESCE(msg.message_count, 0) AS message_count
             FROM relationships r
             LEFT JOIN user_profiles p ON p.guild_id = r.guild_id AND p.user_id = r.user_id
             LEFT JOIN economy e ON e.guild_id = r.guild_id AND e.user_id = r.user_id
@@ -374,6 +389,10 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                        SUM(repair_hull_total) AS repair_hull_total
                 FROM crew_work_stats GROUP BY guild_id, user_id
             ) cw ON cw.guild_id = r.guild_id AND cw.user_id = r.user_id
+            LEFT JOIN (
+                SELECT guild_id, user_id, COUNT(*) AS message_count
+                FROM messages GROUP BY guild_id, user_id
+            ) msg ON msg.guild_id = r.guild_id AND msg.user_id = r.user_id
             WHERE r.guild_id = ?
             ORDER BY familiarity DESC, doubloons DESC, username COLLATE NOCASE
             LIMIT ?
@@ -552,6 +571,7 @@ def member_payload(guild_id, user_id):
             "joke_count": scalar(conn, "SELECT COUNT(*) FROM running_jokes WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "running_jokes") else 0,
             "achievement_count": scalar(conn, "SELECT COUNT(*) FROM achievements WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "achievements") else 0,
             "work_runs": scalar(conn, "SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "crew_work_stats") else 0,
+            "message_count": scalar(conn, "SELECT COUNT(*) FROM messages WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "messages") else 0,
         })
         personality_type = infer_personality_type(
             collect_member_signal_text(conn, guild_id, user_id, base),
@@ -572,6 +592,7 @@ def member_payload(guild_id, user_id):
             "achievements": rows(conn, "SELECT achievement, description, awarded_at FROM achievements WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 50", (guild_id, user_id)) if table_exists(conn, "achievements") else [],
             "crew_work": rows(conn, "SELECT * FROM crew_work_stats WHERE guild_id=? AND user_id=? ORDER BY total_runs DESC, job_label LIMIT 50", (guild_id, user_id)) if table_exists(conn, "crew_work_stats") else [],
             "recent_work_runs": rows(conn, "SELECT job_label, result_type, payout, ship_bonus_type, ship_bonus_value, repair_hull, details, created_at FROM crew_work_runs WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 30", (guild_id, user_id)) if table_exists(conn, "crew_work_runs") else [],
+            "recent_messages": rows(conn, "SELECT content, timestamp FROM messages WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 30", (guild_id, user_id)) if table_exists(conn, "messages") else [],
         }
 
 
@@ -709,7 +730,7 @@ function renderGuild() {
     `, 'span-4')}
     ${card('Server Overview', `
       <div class="stats">
-        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
     ${card('Crew Personality Profiles', personalityCards(members), 'span-12')}
@@ -760,6 +781,7 @@ function personalityCards(members) {
       <div>
         ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
         ${m.pronouns ? `<span class="pill">Pronouns: ${esc(m.pronouns)}</span>` : ''}
+        <span class="pill">${num(m.message_count)} messages</span>
         <span class="pill">${num(m.memory_count)} memories</span>
         <span class="pill">${num(m.joke_count)} jokes</span>
         <span class="pill">${num(m.achievement_count)} achievements</span>
@@ -777,7 +799,7 @@ function memberTable(members) {
       <td>${esc(m.relationship_type || '')}<br><span class="pill">Familiarity ${num(m.familiarity)}</span>${m.nickname ? `<span class="pill">${esc(m.nickname)}</span>` : ''}</td>
       <td><b>${esc((m.personality_type && m.personality_type.label) || 'Unclassified')}</b><br>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
       <td>${num(m.doubloons)}</td>
-      <td><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
+      <td><span class="pill">${num(m.message_count)} messages</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -805,6 +827,7 @@ async function openMember(guildId, userId) {
       <div class="card span-6"><h3>Running Jokes / Humor Profile</h3><div class="list">${data.running_jokes.map(j => item(j.joke, j.created_at || '')).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Relationship Events / History</h3><div class="list">${data.relationship_events.map(e => item(e.event, `importance ${e.importance || 0} • ${e.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Crew Work</h3>${simpleRows(data.crew_work, ['job_label','total_runs','success_count','failure_count','rare_count','payout_total','repair_hull_total'])}</div>
+      <div class="card span-6"><h3>Recent Observed Messages</h3><div class="list">${data.recent_messages.map(m => item(m.content, m.timestamp || '')).join('') || '<p class="muted">None yet.</p>'}</div></div>
     </div>`;
   memberDialog.showModal();
 }

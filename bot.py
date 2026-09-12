@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 from cutlass.commands.help import handle_help_command
 from cutlass.commands.crew import handle_crew_command
+from cutlass.commands.crew_read import handle_crew_read_command
 from cutlass.commands.lore import handle_lore_command
 from cutlass.commands.chronicle import handle_chronicle_command
 from cutlass.commands.welcome import handle_welcome_command
@@ -4516,6 +4517,15 @@ async def handle_commands(
         get_parrot=get_parrot,
         get_ship=get_ship,
         is_admin=is_admin
+    ):
+        return True
+
+
+    if await handle_crew_read_command(
+        message,
+        content,
+        command,
+        is_admin=is_admin,
     ):
         return True
 
