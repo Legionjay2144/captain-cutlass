@@ -382,3 +382,58 @@ docker compose exec captain-cutlass python -c "import bot; print('ok')"
 - The image is built from source.
 - The container does not need a separate build step after the image has been rebuilt.
 - The repository includes a `.dockerignore` so build context stays small and excludes local data, caches, and secrets.
+
+## Web dashboard
+
+The project includes a read-only dashboard for inspecting Captain Cutlass data outside Discord. It shows:
+
+- Per-server Living Ship stats, treasury, hull, sails, supplies, morale, voyages, and location.
+- Crew personality/profile data from profiles, relationships, memories, running jokes, and relationship events.
+- Doubloons, ship treasury contributions, achievements, and crew-work totals.
+- World discoveries, recent world history, ship history, voyages, captured ships, and job summaries.
+
+The dashboard uses the same Docker image as the bot and reads the SQLite database through the existing `./data:/app/data` volume. The dashboard container mounts that volume read-only.
+
+Start the dashboard:
+
+```bash
+docker compose --profile dashboard up -d --build dashboard
+```
+
+Open it on the host:
+
+```text
+http://127.0.0.1:8787
+```
+
+The compose file binds the dashboard to localhost only:
+
+```yaml
+127.0.0.1:8787:8787
+```
+
+If you want a simple bearer/query token, add this to `.env`:
+
+```env
+DASHBOARD_TOKEN=choose-a-long-random-value
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8787/?token=choose-a-long-random-value
+```
+
+Health/API checks:
+
+```bash
+curl http://127.0.0.1:8787/api/health
+curl http://127.0.0.1:8787/api/overview
+```
+
+Stop the dashboard without stopping the bot:
+
+```bash
+docker compose --profile dashboard stop dashboard
+```
+

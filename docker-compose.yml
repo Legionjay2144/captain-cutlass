@@ -32,5 +32,32 @@ services:
     volumes:
       - ./data:/app/data
 
+  dashboard:
+    image: captain-cutlass:latest
+    build: .
+    container_name: captain-cutlass-dashboard
+    init: true
+    restart: unless-stopped
+    profiles:
+      - dashboard
+
+    env_file:
+      - .env
+
+    command: ["python", "-u", "dashboard.py"]
+
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      DASHBOARD_HOST: 0.0.0.0
+      DASHBOARD_PORT: 8787
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:-}
+
+    ports:
+      - "127.0.0.1:8787:8787"
+
+    volumes:
+      - ./data:/app/data:ro
+
 volumes:
   ollama:
