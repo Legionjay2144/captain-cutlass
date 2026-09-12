@@ -1162,6 +1162,69 @@ async def analyze_message(
         )
     )
 
+    creator_self_knowledge_request = (
+        is_creator(message.author.id)
+        and any(
+            phrase in content_lower
+            for phrase in (
+                "what do you know about me",
+                "what do you know about jay",
+                "tell me about me",
+                "who am i",
+                "describe me",
+            )
+        )
+    )
+
+    if creator_self_knowledge_request:
+        return {
+            "respond": True,
+            "memory": None,
+            "relationship": None,
+            "opinion": None,
+            "nickname": None,
+            "joke": None,
+            "event": None,
+            "server_lore": None,
+            "lore": None,
+            "reply": (
+                "You're Jay, my creator and shipwright—the one who brought me aboard, "
+                "keeps me maintained, and keeps shaping this pirate world. I know ye like "
+                "practical builds, persistent systems, pirate humor, and improving what already works."
+            ),
+            "suppress_parrot_banter": True,
+        }
+
+    creator_self_roast_request = (
+        is_creator(message.author.id)
+        and any(
+            phrase in content_lower
+            for phrase in (
+                "roast me",
+                "tease me",
+                "make fun of me",
+            )
+        )
+    )
+
+    if creator_self_roast_request:
+        return {
+            "respond": True,
+            "memory": None,
+            "relationship": None,
+            "opinion": None,
+            "nickname": None,
+            "joke": None,
+            "event": None,
+            "server_lore": None,
+            "lore": None,
+            "reply": (
+                "Jay, ye call it one small tweak the way a pirate calls a cannonball "
+                "a light snack—useful, dramatic, and somehow heavier than promised."
+            ),
+            "suppress_parrot_banter": True,
+        }
+
     if recorded_story_request:
 
         records = await get_history_records(

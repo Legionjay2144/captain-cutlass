@@ -11,6 +11,76 @@ from ship_world import get_completed_voyages, get_history_records
 from cutlass.world.pirate_world import format_discoveries
 
 
+
+FOLLOWUP_ONLY_PATTERNS = (
+    "what happened after that",
+    "after that",
+    "then what",
+    "what happened next",
+    "did anyone earn anything from it",
+    "did anyone earn anything",
+    "what did we earn from it",
+    "what did we get from it",
+    "what was the reward",
+    "what rewards did we get",
+)
+
+BOT_NAME_MARKERS = (
+    "captain-cutlass",
+    "captain cutlass",
+)
+
+
+async def infer_recent_history_topic(message):
+    recent = await get_recent_messages(message.guild.id, message.channel.id, 12)
+    current_content = str(message.content or "").strip().lower()
+
+    for username, content in reversed(recent):
+        lowered_content = str(content or "").strip().lower()
+        lowered_username = str(username or "").strip().lower()
+
+        if not lowered_content:
+            continue
+
+        if lowered_content == current_content:
+            continue
+
+        if any(marker in lowered_username for marker in BOT_NAME_MARKERS):
+            continue
+
+        if any(pattern in lowered_content for pattern in FOLLOWUP_ONLY_PATTERNS):
+            continue
+
+        topic = classify_history_topic(lowered_content)
+        if topic:
+            return topic
+
+    for username, content in reversed(recent):
+        lowered_content = str(content or "").strip().lower()
+        lowered_username = str(username or "").strip().lower()
+
+        if lowered_content == current_content:
+            continue
+
+        if not any(marker in lowered_username for marker in BOT_NAME_MARKERS):
+            continue
+
+        if lowered_content.startswith("our latest battle:"):
+            return "battle"
+        if lowered_content.startswith("our latest recorded voyage:"):
+            return "voyage"
+        if lowered_content.startswith("our latest sea monster encounter:"):
+            return "monster"
+        if lowered_content.startswith("our latest boss encounter:"):
+            return "boss"
+        if lowered_content.startswith("our latest exploration:"):
+            return "exploration"
+        if lowered_content.startswith("our latest crew repair work:"):
+            return "repair"
+
+    return None
+
+
 async def build_world_context(
     guild_id,
     *,
@@ -128,12 +198,7 @@ async def resolve_authoritative_question(message, current_ship, canon_rows):
         "what rewards did we get",
     )
     if any(phrase in content for phrase in reward_followup_patterns):
-        recent = await get_recent_messages(message.guild.id, message.channel.id, 8)
-        recent_topic = None
-        for row in reversed(recent):
-            recent_topic = classify_history_topic(row[1])
-            if recent_topic:
-                break
+        recent_topic = await infer_recent_history_topic(message)
 
         if recent_topic == "voyage":
             voyages = await get_completed_voyages(message.guild.id, limit=1)
@@ -153,6 +218,33 @@ async def resolve_authoritative_question(message, current_ship, canon_rows):
 
         return "I don't have a recorded reward for that recent topic, matey."
 
+    after_followup_patterns = (
+        "what happened after that",
+        "after that",
+        "then what",
+        "what happened next",
+    )
+    if any(phrase in content for phrase in after_followup_patterns):
+        recent_topic = await infer_recent_history_topic(message)
+
+        if recent_topic == "voyage":
+            voyages = await get_completed_voyages(message.guild.id, limit=1)
+            if voyages:
+                return "The latest recorded voyage entry is still: " + str(voyages[0]["content"])
+
+        if recent_topic in HISTORY_TOPIC_RULES:
+            records = await get_history_records(message.guild.id, limit=20)
+            topic_records = _history_records_for_topic(records, recent_topic)
+            if topic_records:
+                return (
+                    "The latest recorded "
+                    + HISTORY_TOPIC_RULES[recent_topic]["label"]
+                    + " entry is still: "
+                    + str(topic_records[0]["content"])
+                )
+
+        return "I don't have a clear recorded event after that topic, matey."
+
     history_followup_patterns = (
         "one before that",
         "the one before that",
@@ -161,12 +253,7 @@ async def resolve_authoritative_question(message, current_ship, canon_rows):
         "before that one",
     )
     if any(phrase in content for phrase in history_followup_patterns):
-        recent = await get_recent_messages(message.guild.id, message.channel.id, 8)
-        recent_topic = None
-        for row in reversed(recent):
-            recent_topic = classify_history_topic(row[1])
-            if recent_topic:
-                break
+        recent_topic = await infer_recent_history_topic(message)
 
         if recent_topic == "voyage":
             voyages = await get_completed_voyages(message.guild.id, limit=3)
