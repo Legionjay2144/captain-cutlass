@@ -124,6 +124,50 @@ def verify_dashboard_password(password, stored_hash):
         return False
 
 
+def normalize_dashboard_access(record):
+    role = record.get("role", "user") if isinstance(record, dict) else "user"
+    access = record.get("access", {}) if isinstance(record, dict) else {}
+    if role == "admin":
+        return {"all": True, "global": True, "guild_ids": []}
+    if not isinstance(access, dict):
+        access = {}
+    return {
+        "all": bool(access.get("all", False)),
+        "global": bool(access.get("global", False)),
+        "guild_ids": sorted(str(guild_id) for guild_id in access.get("guild_ids", []) if str(guild_id).strip()),
+    }
+
+
+def dashboard_user_can_global(user):
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    access = user.get("access") or normalize_dashboard_access(user)
+    return bool(access.get("all") or access.get("global"))
+
+
+def dashboard_user_can_guild(user, guild_id):
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    access = user.get("access") or normalize_dashboard_access(user)
+    return bool(access.get("all") or str(guild_id) in set(access.get("guild_ids", [])))
+
+
+def require_dashboard_access(user, guild_id=None, global_required=False):
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    if global_required:
+        return dashboard_user_can_global(user)
+    if guild_id is not None:
+        return dashboard_user_can_guild(user, guild_id)
+    return True
+
+
 def load_dashboard_users():
     path = Path(DASHBOARD_USERS_FILE)
     if not path.exists():
@@ -137,10 +181,12 @@ def load_dashboard_users():
     for username, record in users.items():
         if not isinstance(record, dict) or not record.get("password_hash"):
             continue
+        role = "admin" if record.get("role") == "admin" else "user"
         clean[str(username)] = {
             "password_hash": str(record.get("password_hash")),
-            "role": "admin" if record.get("role") == "admin" else "user",
+            "role": role,
             "created_at": record.get("created_at"),
+            "access": normalize_dashboard_access({**record, "role": role}),
         }
     return clean
 
@@ -153,6 +199,7 @@ def save_dashboard_users(users):
             "password_hash": record["password_hash"],
             "role": "admin" if record.get("role") == "admin" else "user",
             "created_at": record.get("created_at") or int(time.time()),
+            "access": normalize_dashboard_access(record),
         }
         for username, record in sorted(users.items())
     }
@@ -173,6 +220,7 @@ def ensure_dashboard_users():
             "password_hash": hash_dashboard_password(password),
             "role": seed.get("role", "admin"),
             "created_at": created_at,
+            "access": normalize_dashboard_access({"role": seed.get("role", "admin"), "access": users.get(username, {}).get("access", {})}),
         }
         changed = True
     if changed:
@@ -186,6 +234,7 @@ def dashboard_public_users():
             "username": username,
             "role": record.get("role", "user"),
             "created_at": record.get("created_at"),
+            "access": normalize_dashboard_access(record),
         }
         for username, record in sorted(load_dashboard_users().items())
     ]
@@ -201,10 +250,10 @@ def verify_dashboard_login(username, password):
         return None
     if not verify_dashboard_password(password, record.get("password_hash", "")):
         return None
-    return {"username": username, "role": record.get("role", "user")}
+    return {"username": username, "role": record.get("role", "user"), "access": normalize_dashboard_access(record)}
 
 
-def create_dashboard_user(username, password, role="user"):
+def create_dashboard_user(username, password, role="user", access=None):
     username = re.sub(r"[^A-Za-z0-9_.@-]", "", str(username or "").strip())
     if len(username) < 2:
         raise ValueError("Username must be at least 2 characters.")
@@ -213,13 +262,15 @@ def create_dashboard_user(username, password, role="user"):
     users = load_dashboard_users()
     if username in users:
         raise ValueError("That dashboard user already exists.")
+    role = "admin" if role == "admin" else "user"
     users[username] = {
         "password_hash": hash_dashboard_password(password),
-        "role": "admin" if role == "admin" else "user",
+        "role": role,
         "created_at": int(time.time()),
+        "access": normalize_dashboard_access({"role": role, "access": access or {"all": False, "global": False, "guild_ids": []}}),
     }
     save_dashboard_users(users)
-    return {"username": username, "role": users[username]["role"], "created_at": users[username]["created_at"]}
+    return {"username": username, "role": users[username]["role"], "created_at": users[username]["created_at"], "access": users[username]["access"]}
 
 
 def delete_dashboard_user(username):
@@ -232,6 +283,24 @@ def delete_dashboard_user(username):
         raise ValueError("Cannot remove the last dashboard admin.")
     del users[username]
     save_dashboard_users(users)
+
+
+def update_dashboard_user_access(username, role=None, access=None):
+    users = load_dashboard_users()
+    record = users.get(username)
+    if not record:
+        raise ValueError("That dashboard user does not exist.")
+    current_role = record.get("role", "user")
+    next_role = "admin" if role == "admin" else "user" if role == "user" else current_role
+    if current_role == "admin" and next_role != "admin":
+        admin_count = sum(1 for item in users.values() if item.get("role") == "admin")
+        if admin_count <= 1:
+            raise ValueError("Cannot demote the last dashboard admin.")
+    record["role"] = next_role
+    record["access"] = normalize_dashboard_access({"role": next_role, "access": access if access is not None else record.get("access", {})})
+    users[username] = record
+    save_dashboard_users(users)
+    return {"username": username, "role": record["role"], "created_at": record.get("created_at"), "access": record["access"]}
 
 
 ensure_dashboard_users()
@@ -884,9 +953,12 @@ def guild_summary(conn, guild_id):
     }
 
 
-def overview_payload():
+def overview_payload(user=None):
     with db_connect() as conn:
-        guilds = [guild_summary(conn, guild_id) for guild_id in guild_ids(conn)]
+        ids = guild_ids(conn)
+        if user is not None:
+            ids = [guild_id for guild_id in ids if dashboard_user_can_guild(user, guild_id)]
+        guilds = [guild_summary(conn, guild_id) for guild_id in ids]
         guilds.sort(
             key=lambda item: (
                 item["counts"].get("members", 0),
@@ -900,7 +972,13 @@ def overview_payload():
         return {
             "database": DB_PATH,
             "guilds": guilds,
+            "can_view_global": dashboard_user_can_global(user) if user is not None else True,
         }
+
+
+def dashboard_access_options_payload():
+    with db_connect() as conn:
+        return {"guilds": [guild_summary(conn, guild_id) for guild_id in guild_ids(conn)]}
 
 
 def guild_payload(guild_id):
@@ -1019,7 +1097,7 @@ def guild_payload(guild_id):
         return payload
 
 
-def member_payload(guild_id, user_id):
+def member_payload(guild_id, user_id, include_global=True):
     with db_connect() as conn:
         profile = one(conn, "SELECT * FROM user_profiles WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "user_profiles") else None
         relationship = one(conn, "SELECT * FROM relationships WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "relationships") else None
@@ -1046,7 +1124,7 @@ def member_payload(guild_id, user_id):
             collect_member_signal_text(conn, guild_id, user_id, base),
             base,
         )
-        global_profile = global_member_profile(conn, user_id)
+        global_profile = global_member_profile(conn, user_id) if include_global else None
 
         return {
             "guild_id": guild_id,
@@ -1131,6 +1209,9 @@ INDEX_HTML = r"""
     tr.clickable { cursor:pointer; }
     tr.clickable:hover { background:rgba(16,231,239,.08); }
     .pill { display:inline-block; border:1px solid rgba(16,231,239,.28); background:rgba(0,0,0,.24); border-radius:4px; padding:3px 9px; color:#9ff8ff; font-size:12px; margin:2px; }
+    .access-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; width:100%; margin-top:8px; }
+    .access-grid label, .access-toggle { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--dimline); background:rgba(0,0,0,.18); border-radius:6px; color:var(--muted); margin:0; }
+    .access-grid input, .access-toggle input { width:auto; box-shadow:none; }
     .bar { height:10px; background:#071114; border:1px solid rgba(16,231,239,.25); border-radius:999px; overflow:hidden; }
     .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--cyan2),var(--cyan),var(--gold)); box-shadow:0 0 14px rgba(16,231,239,.5); }
     .muted { color:var(--muted); } .gold { color:var(--gold); } .green { color:var(--green); } .red { color:var(--red); }
@@ -1218,13 +1299,19 @@ async function loadOverview() {
   if (session.user && session.user.role === 'admin') $('adminBtn').style.display = '';
   overview = await api('/api/overview');
   const select = $('guildSelect');
-  select.innerHTML = `<option value="__global__">Global Info — all servers and matched users</option>` + overview.guilds.map(g => {
+  const globalOption = overview.can_view_global ? `<option value="__global__">Global Info — all servers and matched users</option>` : '';
+  const serverOptions = overview.guilds.map(g => {
     const counts = g.counts || {};
     const shipName = (g.ship && g.ship.name) || 'No ship';
     const guildName = g.guild_name || `Server ${g.guild_id}`;
     return `<option value="${g.guild_id}">${esc(guildName)} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
   }).join('');
-  selectedGuild = select.value || '__global__';
+  select.innerHTML = globalOption + serverOptions;
+  selectedGuild = select.value || (overview.can_view_global ? '__global__' : ((overview.guilds[0] || {}).guild_id || ''));
+  if (!selectedGuild) {
+    $('content').innerHTML = card('No Access Assigned', '<p class="muted">This dashboard account does not have access to global info or any servers yet. Ask an admin to update Crew Access.</p>');
+    return;
+  }
   await loadSelected(selectedGuild);
   $('status').textContent = 'Ready';
 }
@@ -1471,8 +1558,11 @@ async function openMember(guildId, userId) {
   memberDialog.showModal();
 }
 
+let adminAccessOptions = {guilds: []};
+
 async function openAdminUsers() {
   const data = await api('/api/admin/users');
+  adminAccessOptions = data.options || {guilds: []};
   $('adminBody').innerHTML = `
     <div class="card span-12">
       <h3>Create User</h3>
@@ -1480,27 +1570,83 @@ async function openAdminUsers() {
         <input id="newDashUser" placeholder="username">
         <input id="newDashPass" type="password" placeholder="password">
         <select id="newDashRole"><option value="user">User</option><option value="admin">Admin</option></select>
+        <select id="newDashScope"><option value="selected">Selected servers</option><option value="global">Global only</option><option value="all">All access</option></select>
         <button type="button" onclick="createDashboardUserFromForm()">Create</button>
       </div>
-      <p class="muted">Admins can create and remove dashboard accounts. User accounts can view the dashboard only.</p>
+      <div class="access-grid">${accessCheckboxes('newDashGuild', [])}</div>
+      <p class="muted">Admins always see everything. Regular users can be limited to global info, selected servers, or all dashboard data.</p>
     </div>
     <div class="card span-12"><h3>Existing Users</h3>${dashboardUsersTable(data.users || [])}</div>
   `;
   adminDialog.showModal();
 }
 
+function accessSummary(user) {
+  const access = user.access || {};
+  if (user.role === 'admin' || access.all) return 'All dashboard data';
+  const parts = [];
+  if (access.global) parts.push('Global info');
+  const guildIds = access.guild_ids || [];
+  if (guildIds.length) parts.push(`${guildIds.length} server(s)`);
+  return parts.join(' + ') || 'No access assigned';
+}
+
+function accessCheckboxes(prefix, selected) {
+  const selectedSet = new Set((selected || []).map(String));
+  const guilds = (adminAccessOptions.guilds || []);
+  if (!guilds.length) return '<p class="muted">No servers found.</p>';
+  return guilds.map(g => {
+    const name = g.guild_name || `Server ${g.guild_id}`;
+    return `<label><input type="checkbox" data-access-prefix="${esc(prefix)}" value="${esc(g.guild_id)}" ${selectedSet.has(String(g.guild_id)) ? 'checked' : ''}> ${esc(name)}</label>`;
+  }).join('');
+}
+
+function selectedGuildAccess(prefix) {
+  return Array.from(document.querySelectorAll(`input[data-access-prefix="${prefix}"]:checked`)).map(input => input.value);
+}
+
 function dashboardUsersTable(users) {
   if (!users.length) return '<p class="muted">No dashboard users configured.</p>';
-  return `<table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Action</th></tr></thead><tbody>${users.map(u => `
-    <tr><td><b>${esc(u.username)}</b></td><td>${esc(u.role)}</td><td>${esc(u.created_at || '')}</td><td><button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete</button></td></tr>
-  `).join('')}</tbody></table>`;
+  return `<table><thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Edit access</th><th>Action</th></tr></thead><tbody>${users.map(u => {
+    const access = u.access || {};
+    const prefix = `access_${String(u.username).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    return `<tr>
+      <td><b>${esc(u.username)}</b><br><span class="muted">Created ${esc(u.created_at || '')}</span></td>
+      <td><select id="${prefix}_role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></td>
+      <td>${esc(accessSummary(u))}</td>
+      <td>
+        <label class="access-toggle"><input id="${prefix}_all" type="checkbox" ${access.all ? 'checked' : ''}> All access</label>
+        <label class="access-toggle"><input id="${prefix}_global" type="checkbox" ${access.global ? 'checked' : ''}> Global info</label>
+        <div class="access-grid">${accessCheckboxes(prefix, access.guild_ids || [])}</div>
+        <button type="button" onclick="saveDashboardAccess('${esc(u.username)}','${prefix}')">Save Access</button>
+      </td>
+      <td><button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete</button></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 async function createDashboardUserFromForm() {
   const username = $('newDashUser').value;
   const password = $('newDashPass').value;
   const role = $('newDashRole').value;
-  await apiJson('/api/admin/users', {username, password, role});
+  const scope = $('newDashScope').value;
+  const access = {
+    all: scope === 'all',
+    global: scope === 'all' || scope === 'global',
+    guild_ids: scope === 'selected' ? selectedGuildAccess('newDashGuild') : [],
+  };
+  await apiJson('/api/admin/users', {username, password, role, access});
+  await openAdminUsers();
+}
+
+async function saveDashboardAccess(username, prefix) {
+  const role = $(`${prefix}_role`).value;
+  const access = {
+    all: $(`${prefix}_all`).checked,
+    global: $(`${prefix}_global`).checked,
+    guild_ids: selectedGuildAccess(prefix),
+  };
+  await apiJson('/api/admin/users/access', {username, role, access});
   await openAdminUsers();
 }
 
@@ -1617,19 +1763,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
         record = dashboard_user_record(username)
         if not record:
             return None
-        return {"username": username, "role": record.get("role", "user")}
+        return {"username": username, "role": record.get("role", "user"), "access": normalize_dashboard_access(record)}
+
+    def token_authorized(self):
+        if not DASHBOARD_TOKEN:
+            return False
+        token = self.query_token()
+        return bool(token and hmac.compare_digest(token, DASHBOARD_TOKEN))
+
+    def access_user(self):
+        user = self.current_user()
+        if user:
+            return user
+        if self.token_authorized():
+            return {"username": "token", "role": "admin", "access": {"all": True, "global": True, "guild_ids": []}}
+        if not DASHBOARD_TOKEN and not dashboard_login_enabled():
+            return {"username": "open", "role": "admin", "access": {"all": True, "global": True, "guild_ids": []}}
+        return None
 
     def authorized(self):
-        if DASHBOARD_TOKEN:
-            token = self.query_token()
-            if token and hmac.compare_digest(token, DASHBOARD_TOKEN):
-                return True
-        if self.current_user():
-            return True
-        return not DASHBOARD_TOKEN and not dashboard_login_enabled()
+        return self.access_user() is not None
 
     def admin_authorized(self):
-        user = self.current_user()
+        user = self.access_user()
         return bool(user and user.get("role") == "admin")
 
     def send_json(self, payload, status=200):
@@ -1712,33 +1868,46 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "database": DB_PATH, "login_enabled": dashboard_login_enabled()})
                 return
             if path == "/api/session":
-                self.send_json({"user": self.current_user(), "login_enabled": dashboard_login_enabled()})
+                self.send_json({"user": self.access_user(), "login_enabled": dashboard_login_enabled()})
                 return
             if path == "/api/admin/users":
                 if not self.admin_authorized():
                     self.send_json({"error": "admin required"}, 403)
                     return
-                self.send_json({"users": dashboard_public_users()})
+                self.send_json({"users": dashboard_public_users(), "options": dashboard_access_options_payload()})
                 return
             if path == "/api/overview":
-                self.send_json(overview_payload())
+                self.send_json(overview_payload(self.access_user()))
                 return
             if path == "/api/global":
+                if not require_dashboard_access(self.access_user(), global_required=True):
+                    self.send_json({"error": "global access required"}, 403)
+                    return
                 self.send_json(global_payload())
                 return
             if path.startswith("/api/global/member/"):
+                if not require_dashboard_access(self.access_user(), global_required=True):
+                    self.send_json({"error": "global access required"}, 403)
+                    return
                 user_id = safe_int(path.split("/")[-1])
                 self.send_json(global_member_payload(user_id))
                 return
             if path.startswith("/api/guild/"):
                 guild_id = safe_int(path.split("/")[-1])
+                if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                    self.send_json({"error": "server access required"}, 403)
+                    return
                 self.send_json(guild_payload(guild_id))
                 return
             if path.startswith("/api/member/"):
                 parts = path.split("/")
                 guild_id = safe_int(parts[-2])
                 user_id = safe_int(parts[-1])
-                self.send_json(member_payload(guild_id, user_id))
+                current = self.access_user()
+                if not require_dashboard_access(current, guild_id=guild_id):
+                    self.send_json({"error": "server access required"}, 403)
+                    return
+                self.send_json(member_payload(guild_id, user_id, include_global=dashboard_user_can_global(current)))
                 return
             self.send_json({"error": "not found"}, 404)
         except Exception as exc:
@@ -1782,11 +1951,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json_body()
             try:
-                user = create_dashboard_user(payload.get("username"), payload.get("password"), payload.get("role", "user"))
+                user = create_dashboard_user(payload.get("username"), payload.get("password"), payload.get("role", "user"), payload.get("access"))
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, 400)
                 return
             self.send_json({"user": user, "users": dashboard_public_users()}, 201)
+            return
+
+        if path == "/api/admin/users/access":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            try:
+                user = update_dashboard_user_access(str(payload.get("username", "")), payload.get("role"), payload.get("access"))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"user": user, "users": dashboard_public_users()})
             return
 
         if path == "/api/admin/users/delete":
