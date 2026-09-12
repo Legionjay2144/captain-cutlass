@@ -3,10 +3,15 @@ import re
 
 import discord
 
+from features import milestone_for_familiarity, relationship_for_familiarity
+
 _ACTIVE_IMPORTS = {}
 _STOP_REQUESTS = set()
 _ACTIVE_SERVER_IMPORTS = {}
 _SERVER_STOP_REQUESTS = set()
+
+IMPORT_MESSAGES_PER_FAMILIARITY = 3
+IMPORT_FAMILIARITY_MAX_PER_RUN = 35
 
 
 def _server_key(guild_id):
@@ -110,6 +115,72 @@ def _format_server_summary(results, processed_channels, skipped_channels, *, sto
     return "\n".join(lines)[:1900]
 
 
+async def _apply_import_familiarity(
+    guild_id,
+    imported_by_user,
+    *,
+    get_relationship,
+    increase_familiarity,
+    update_relationship,
+    add_relationship_event,
+    familiarity_gains,
+):
+    if not imported_by_user:
+        return
+
+    for user_id, imported_count in imported_by_user.items():
+        if imported_count <= 0:
+            continue
+
+        already_gained = int(familiarity_gains.get(user_id, 0))
+        remaining_gain = IMPORT_FAMILIARITY_MAX_PER_RUN - already_gained
+        if remaining_gain <= 0:
+            continue
+
+        gain = max(
+            1,
+            imported_count // IMPORT_MESSAGES_PER_FAMILIARITY,
+        )
+        gain = min(gain, remaining_gain)
+
+        if gain <= 0:
+            continue
+
+        old_value, new_value = await increase_familiarity(
+            guild_id,
+            user_id,
+            amount=gain,
+        )
+        familiarity_gains[user_id] = already_gained + max(0, new_value - old_value)
+
+        relationship = await get_relationship(guild_id, user_id)
+        current_type = (
+            str((relationship or {}).get("relationship_type") or "")
+            .strip()
+            .lower()
+        )
+        if current_type != "creator":
+            relationship_type = relationship_for_familiarity(new_value)
+            await update_relationship(
+                guild_id,
+                user_id,
+                relationship_type=relationship_type,
+            )
+
+        milestone = milestone_for_familiarity(old_value, new_value)
+        if milestone is not None:
+            await add_relationship_event(
+                guild_id,
+                user_id,
+                (
+                    "Imported message history raised familiarity to "
+                    + str(milestone)
+                    + "/100 with Captain Cutlass."
+                ),
+                importance=5,
+            )
+
+
 async def _import_channel_history(
     status_channel,
     target_channel,
@@ -119,11 +190,18 @@ async def _import_channel_history(
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
+    get_relationship,
+    increase_familiarity,
+    update_relationship,
+    add_relationship_event,
     get_import_progress,
     upsert_import_progress,
+    familiarity_gains=None,
     announce=True,
 ):
     key = _key(target_channel.guild.id, target_channel.id)
+    if familiarity_gains is None:
+        familiarity_gains = {}
     imported = 0
     scanned = 0
     last_seen_id = None
@@ -199,6 +277,7 @@ async def _import_channel_history(
 
             batch_imported = 0
             batch_scanned = 0
+            imported_by_user = {}
             for historic_message in batch:
                 last_seen_id = historic_message.id
                 batch_scanned += 1
@@ -242,6 +321,20 @@ async def _import_channel_history(
                 if inserted_id:
                     imported += 1
                     batch_imported += 1
+                    imported_by_user[historic_message.author.id] = (
+                        imported_by_user.get(historic_message.author.id, 0)
+                        + 1
+                    )
+
+            await _apply_import_familiarity(
+                target_channel.guild.id,
+                imported_by_user,
+                get_relationship=get_relationship,
+                increase_familiarity=increase_familiarity,
+                update_relationship=update_relationship,
+                add_relationship_event=add_relationship_event,
+                familiarity_gains=familiarity_gains,
+            )
 
             before = discord.Object(id=int(last_seen_id)) if last_seen_id else before
             await upsert_import_progress(
@@ -289,6 +382,10 @@ async def _import_server_history(
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
+    get_relationship,
+    increase_familiarity,
+    update_relationship,
+    add_relationship_event,
     get_import_progress,
     upsert_import_progress,
 ):
@@ -297,6 +394,7 @@ async def _import_server_history(
     imported_channels = 0
     skipped_channels = 0
     results = []
+    familiarity_gains = {}
 
     try:
         if not channels:
@@ -322,8 +420,13 @@ async def _import_server_history(
                     ensure_user_profile=ensure_user_profile,
                     ensure_relationship=ensure_relationship,
                     touch_member_seen=touch_member_seen,
+                    get_relationship=get_relationship,
+                    increase_familiarity=increase_familiarity,
+                    update_relationship=update_relationship,
+                    add_relationship_event=add_relationship_event,
                     get_import_progress=get_import_progress,
                     upsert_import_progress=upsert_import_progress,
+                    familiarity_gains=familiarity_gains,
                     announce=False,
                 )
             )
@@ -349,6 +452,10 @@ async def handle_history_import_command(
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
+    get_relationship,
+    increase_familiarity,
+    update_relationship,
+    add_relationship_event,
     get_import_progress,
     upsert_import_progress,
     list_import_progress,
@@ -405,6 +512,10 @@ async def handle_history_import_command(
                 ensure_user_profile=ensure_user_profile,
                 ensure_relationship=ensure_relationship,
                 touch_member_seen=touch_member_seen,
+                get_relationship=get_relationship,
+                increase_familiarity=increase_familiarity,
+                update_relationship=update_relationship,
+                add_relationship_event=add_relationship_event,
                 get_import_progress=get_import_progress,
                 upsert_import_progress=upsert_import_progress,
             )
@@ -444,6 +555,10 @@ async def handle_history_import_command(
             ensure_user_profile=ensure_user_profile,
             ensure_relationship=ensure_relationship,
             touch_member_seen=touch_member_seen,
+            get_relationship=get_relationship,
+            increase_familiarity=increase_familiarity,
+            update_relationship=update_relationship,
+            add_relationship_event=add_relationship_event,
             get_import_progress=get_import_progress,
             upsert_import_progress=upsert_import_progress,
         )
