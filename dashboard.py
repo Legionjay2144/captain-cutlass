@@ -497,12 +497,14 @@ def ensure_dashboard_users():
         password = seed.get("password")
         if not username or not password:
             continue
-        created_at = users.get(username, {}).get("created_at") or int(time.time())
+        if username in users:
+            continue
+        role = seed.get("role", "admin")
         users[username] = {
             "password_hash": hash_dashboard_password(password),
-            "role": seed.get("role", "admin"),
-            "created_at": created_at,
-            "access": normalize_dashboard_access({"role": seed.get("role", "admin"), "access": users.get(username, {}).get("access", {})}),
+            "role": role,
+            "created_at": int(time.time()),
+            "access": normalize_dashboard_access({"role": role, "access": {}}),
         }
         changed = True
     if changed:
@@ -583,6 +585,22 @@ def update_dashboard_user_access(username, role=None, access=None):
     users[username] = record
     save_dashboard_users(users)
     return {"username": username, "role": record["role"], "created_at": record.get("created_at"), "access": record["access"]}
+
+
+def update_dashboard_user_password(username, new_password, current_password=None, require_current=False):
+    username = str(username or "").strip()
+    users = load_dashboard_users()
+    record = users.get(username)
+    if not record:
+        raise ValueError("That dashboard user does not exist.")
+    if require_current and not verify_dashboard_password(str(current_password or ""), record.get("password_hash", "")):
+        raise ValueError("Current password is incorrect.")
+    if len(str(new_password or "")) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    record["password_hash"] = hash_dashboard_password(str(new_password))
+    users[username] = record
+    save_dashboard_users(users)
+    return {"username": username, "role": record.get("role", "user"), "created_at": record.get("created_at"), "access": normalize_dashboard_access(record)}
 
 
 ensure_dashboard_users()
@@ -1704,6 +1722,7 @@ INDEX_HTML = r"""
     <label>Server <select id="guildSelect"></select></label>
     <input id="memberSearch" placeholder="Filter crew by name, relationship, summary…" size="42">
     <button id="refreshBtn">Refresh Charts</button>
+    <button id="accountBtn" type="button">My Account</button>
     <button id="adminBtn" type="button" style="display:none">Crew Access</button>
     <button type="button" onclick="window.location.href='/logout'">Leave Port</button>
     <span id="status" class="muted"></span>
@@ -1712,6 +1731,7 @@ INDEX_HTML = r"""
 </main>
 <dialog id="memberDialog"><div class="modal-head"><h2 id="memberTitle"></h2><button onclick="memberDialog.close()">Close</button></div><div id="memberBody" class="modal-body"></div></dialog>
 <dialog id="adminDialog"><div class="modal-head"><h2>Quarterdeck Access</h2><button onclick="adminDialog.close()">Close</button></div><div id="adminBody" class="modal-body"></div></dialog>
+<dialog id="accountDialog"><div class="modal-head"><h2>My Account</h2><button onclick="accountDialog.close()">Close</button></div><div id="accountBody" class="modal-body"></div></dialog>
 <script>
 const $ = id => document.getElementById(id);
 let overview = null;
@@ -2184,7 +2204,7 @@ function selectedGuildAccess(prefix) {
 
 function dashboardUsersTable(users) {
   if (!users.length) return '<p class="muted">No dashboard users configured.</p>';
-  return `<table><thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Edit access</th><th>Action</th></tr></thead><tbody>${users.map(u => {
+  return `<table><thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Edit access</th><th>Password</th><th>Action</th></tr></thead><tbody>${users.map(u => {
     const access = u.access || {};
     const prefix = `access_${String(u.username).replace(/[^A-Za-z0-9_-]/g, '_')}`;
     return `<tr>
@@ -2196,6 +2216,10 @@ function dashboardUsersTable(users) {
         <label class="access-toggle"><input id="${prefix}_global" type="checkbox" ${access.global ? 'checked' : ''}> Global info</label>
         <div class="access-grid">${accessCheckboxes(prefix, access.guild_ids || [])}</div>
         <button type="button" onclick="saveDashboardAccess('${esc(u.username)}','${prefix}')">Save Access</button>
+      </td>
+      <td>
+        <input id="${prefix}_password" type="password" placeholder="new password" size="14">
+        <button type="button" onclick="resetDashboardPassword('${esc(u.username)}','${prefix}')">Reset</button>
       </td>
       <td><button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete</button></td>
     </tr>`;
@@ -2232,8 +2256,46 @@ async function deleteDashboardUser(username) {
   await openAdminUsers();
 }
 
+function openAccountSettings() {
+  const username = sessionUser ? sessionUser.username : '';
+  const canChangePassword = username && username !== 'token' && username !== 'open';
+  $('accountBody').innerHTML = `
+    <div class="card span-12">
+      <h3>${esc(username || 'Dashboard Account')}</h3>
+      <p class="muted">Change the password for the dashboard account you used to log in.</p>
+      ${canChangePassword ? `
+        <div class="toolbar">
+          <input id="accountCurrentPassword" type="password" placeholder="current password">
+          <input id="accountNewPassword" type="password" placeholder="new password">
+          <button type="button" onclick="changeOwnPassword()">Change Password</button>
+        </div>
+        <p class="muted">New passwords must be at least 8 characters.</p>
+      ` : '<p class="muted">Password changes are available only for named dashboard logins.</p>'}
+    </div>
+  `;
+  accountDialog.showModal();
+}
+
+async function changeOwnPassword() {
+  const current_password = $('accountCurrentPassword').value;
+  const new_password = $('accountNewPassword').value;
+  await apiJson('/api/account/password', {current_password, new_password});
+  $('accountCurrentPassword').value = '';
+  $('accountNewPassword').value = '';
+  $('status').textContent = 'Password changed';
+  accountDialog.close();
+}
+
+async function resetDashboardPassword(username, prefix) {
+  const new_password = $(`${prefix}_password`).value;
+  await apiJson('/api/admin/users/password', {username, new_password});
+  $('status').textContent = `Password reset for ${username}`;
+  await openAdminUsers();
+}
+
 $('guildSelect').addEventListener('change', e => loadSelected(e.target.value));
 $('refreshBtn').addEventListener('click', () => selectedGuild ? loadSelected(selectedGuild) : loadOverview());
+$('accountBtn').addEventListener('click', () => openAccountSettings());
 $('adminBtn').addEventListener('click', () => openAdminUsers().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); }));
 $('memberSearch').addEventListener('input', () => currentView === 'global' ? renderGlobal() : (guild && renderGuild()));
 loadOverview().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); });
@@ -2541,6 +2603,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json({"user": user, "users": dashboard_public_users()}, 201)
             return
 
+        if path == "/api/account/password":
+            current = self.current_user()
+            if not current:
+                self.send_json({"error": "dashboard login required"}, 403)
+                return
+            payload = self.read_json_body()
+            try:
+                user = update_dashboard_user_password(
+                    current.get("username"),
+                    payload.get("new_password"),
+                    current_password=payload.get("current_password"),
+                    require_current=True,
+                )
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "user": user})
+            return
+
         if path == "/api/admin/assessment/sweep":
             if not self.admin_authorized():
                 self.send_json({"error": "admin required"}, 403)
@@ -2624,6 +2705,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 400)
                 return
             self.send_json({"user": user, "users": dashboard_public_users()})
+            return
+
+        if path == "/api/admin/users/password":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            try:
+                user = update_dashboard_user_password(str(payload.get("username", "")), payload.get("new_password"), require_current=False)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "user": user, "users": dashboard_public_users()})
             return
 
         if path == "/api/admin/users/delete":

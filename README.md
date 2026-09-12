@@ -428,7 +428,7 @@ Then open:
 http://SERVER_IP:8787/
 ```
 
-The first configured username/password is seeded as an admin account. Admins can open the dashboard, click **Users**, and create additional user or admin accounts. Account records are stored with hashed passwords in `./data/dashboard_users.json`.
+The first configured username/password is seeded as an admin account if it does not already exist. Admins can open the dashboard, click **Crew Access**, and create additional user or admin accounts, limit what each account can see, or reset a user's password. Logged-in users can click **My Account** to change their own password after entering their current password. Account records are stored with hashed passwords in `./data/dashboard_users.json`.
 
 For multiple seed admins, use `DASHBOARD_USERS` instead of, or in addition to, the single username/password pair:
 
