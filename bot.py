@@ -1097,6 +1097,12 @@ return NONE.
 
 
 
+def captain_display_name(member):
+    if member is not None and is_creator(getattr(member, "id", 0)):
+        return CREATOR_NAME
+    return str(getattr(member, "display_name", "") or getattr(member, "name", "") or "matey")
+
+
 def captain_mood_instructions(mood):
 
     mood = str(mood or "").strip().lower()
@@ -1197,8 +1203,8 @@ MEMBER MESSAGE:
 
 Rules:
 - Reply directly to the member's latest message.
-- Keep it concise, usually 1-2 sentences.
-- Stay in Captain Cutlass's pirate voice.
+- Keep it concise, usually 1 sentence and never more than 2.
+- Stay in Captain Cutlass's pirate voice without overdecorating the answer.
 - Do not invent commands, private facts, genders, pronouns, or gameplay records.
 - Return only the reply text.
 """
@@ -1310,7 +1316,7 @@ async def analyze_message(
             "event": None,
             "server_lore": None,
             "lore": None,
-            "reply": f"Ahoy, {message.author.display_name}!",
+            "reply": f"Ahoy, {captain_display_name(message.author)}!",
             "suppress_parrot_banter": True
         }
 
@@ -1454,7 +1460,7 @@ AUTHORITATIVE RECORDED EVENTS:
 {facts if facts else "NONE"}
 
 TASK:
-Tell a short entertaining pirate story using 3 to 5 of the recorded events above.
+Tell a compact entertaining pirate story using 2 to 3 of the recorded events above.
 
 STRICT FACT RULES:
 - Every gameplay event in the story must come from AUTHORITATIVE RECORDED EVENTS.
@@ -1465,7 +1471,9 @@ STRICT FACT RULES:
 - Make it sound like Captain Cutlass remembering adventures with his crew.
 - Do not merely say "that was a fine tale."
 - Actually tell the story.
-- About 4 to 8 sentences.
+- About 2 to 4 sentences.
+- Keep it under 900 characters.
+- Use natural prose, not a ledger dump.
 
 Return ONLY the story.
 """
@@ -1475,7 +1483,7 @@ Return ONLY the story.
             response = await ai.responses.create(
                 model=OPENAI_MODEL,
                 input=story_prompt,
-                max_output_tokens=350,
+                max_output_tokens=220,
                 store=False,
                 **OPENAI_RESPONSE_OPTIONS
             )
