@@ -1068,74 +1068,86 @@ INDEX_HTML = r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Captain Cutlass Dashboard</title>
+  <title>Captain Cutlass Quarterdeck</title>
   <style>
-    :root { color-scheme: dark; --bg:#08111f; --panel:#111c2e; --panel2:#172640; --text:#e8f0ff; --muted:#9fb0c9; --gold:#f6c453; --red:#ff6b6b; --green:#5ee0a0; --blue:#7db7ff; --line:#263a5d; }
+    :root { color-scheme: dark; --bg:#0b0704; --deck:#140c07; --wood:#251408; --wood2:#3a2110; --panel:#1c120a; --panel2:#2b1b0d; --paper:#f1d79a; --text:#f8ecd2; --muted:#c9a875; --gold:#f4c45b; --rum:#b86b2d; --red:#d94b35; --green:#7ecf7a; --blue:#74a6c6; --line:#6f4921; --ink:#140c07; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background: radial-gradient(circle at top left, #142647, var(--bg) 50%); color:var(--text); }
-    header { padding:28px clamp(16px,4vw,48px); border-bottom:1px solid var(--line); background:rgba(8,17,31,.72); position:sticky; top:0; backdrop-filter: blur(12px); z-index:3; }
-    h1 { margin:0; font-size: clamp(26px, 4vw, 44px); letter-spacing:-.03em; }
-    h2 { margin:0 0 14px; font-size:20px; }
-    h3 { margin:0 0 8px; font-size:16px; color:var(--gold); }
-    .sub { color:var(--muted); margin-top:6px; }
+    body { margin:0; font-family: Georgia, 'Trebuchet MS', ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
+      radial-gradient(circle at 18% 8%, rgba(244,196,91,.18), transparent 28%),
+      radial-gradient(circle at 82% 4%, rgba(116,166,198,.12), transparent 24%),
+      linear-gradient(135deg, rgba(255,255,255,.035) 25%, transparent 25%) 0 0/42px 42px,
+      linear-gradient(45deg, rgba(255,255,255,.025) 25%, transparent 25%) 0 0/38px 38px,
+      linear-gradient(180deg, #15100b 0%, var(--bg) 62%, #050302 100%); }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.58) 100%); z-index:-1; }
+    header { padding:30px clamp(16px,4vw,52px); border-bottom:3px double var(--line); background:linear-gradient(180deg, rgba(39,23,10,.94), rgba(14,8,4,.88)); position:sticky; top:0; backdrop-filter: blur(10px); z-index:3; box-shadow:0 14px 38px rgba(0,0,0,.42), inset 0 -1px rgba(244,196,91,.2); }
+    h1 { margin:0; font-size: clamp(28px, 4vw, 48px); letter-spacing:.01em; color:var(--paper); text-shadow:0 2px 0 #000, 0 0 18px rgba(244,196,91,.24); }
+    h1::before { content:'☠ '; color:var(--gold); }
+    h1::after { content:' ⚓'; color:var(--gold); }
+    h2 { margin:0 0 14px; font-size:21px; color:var(--paper); text-shadow:0 1px 0 #000; }
+    h3 { margin:0 0 8px; font-size:16px; color:var(--gold); letter-spacing:.02em; }
+    .sub { color:var(--muted); margin-top:8px; }
     main { padding:24px clamp(16px,4vw,48px) 60px; display:grid; gap:20px; }
     .toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    select, input, button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; }
-    button { cursor:pointer; background:#1b3358; }
-    button:hover { border-color:var(--gold); }
+    select, input, button { background:linear-gradient(180deg, #2b1b0d, #160d07); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 2px 8px rgba(0,0,0,.25); }
+    input::placeholder { color:#9f8158; }
+    button { cursor:pointer; background:linear-gradient(180deg, #8f5722, #553014); color:#fff4d7; border-color:#b07833; font-weight:700; text-shadow:0 1px #000; }
+    button:hover { border-color:var(--gold); box-shadow:0 0 0 2px rgba(244,196,91,.18), 0 8px 22px rgba(0,0,0,.28); transform:translateY(-1px); }
     .grid { display:grid; grid-template-columns: repeat(12, 1fr); gap:16px; }
-    .card { background:linear-gradient(180deg, rgba(23,38,64,.96), rgba(14,25,43,.96)); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 12px 40px rgba(0,0,0,.25); }
+    .card { background:linear-gradient(180deg, rgba(47,29,13,.97), rgba(20,12,6,.97)); border:2px solid rgba(111,73,33,.9); border-radius:18px; padding:18px; box-shadow:0 14px 42px rgba(0,0,0,.38), inset 0 0 0 1px rgba(244,196,91,.08); position:relative; overflow:hidden; }
+    .card::before { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg, transparent, rgba(244,196,91,.035), transparent), radial-gradient(circle at top right, rgba(244,196,91,.08), transparent 34%); }
+    .card > * { position:relative; }
     .span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-6 { grid-column: span 6; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; }
     .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
-    .stat { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); border-radius:14px; padding:12px; }
-    .stat b { display:block; font-size:24px; color:var(--gold); }
+    .stat { background:linear-gradient(180deg, rgba(241,215,154,.1), rgba(0,0,0,.12)); border:1px solid rgba(244,196,91,.22); border-radius:14px; padding:12px; }
+    .stat b { display:block; font-size:25px; color:var(--gold); text-shadow:0 1px 0 #000; }
     .stat span { color:var(--muted); font-size:13px; }
     table { width:100%; border-collapse:collapse; }
-    th,td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.08); text-align:left; vertical-align:top; }
-    th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+    th,td { padding:10px 8px; border-bottom:1px solid rgba(244,196,91,.13); text-align:left; vertical-align:top; }
+    th { color:var(--gold); font-size:12px; text-transform:uppercase; letter-spacing:.1em; }
     tr.clickable { cursor:pointer; }
-    tr.clickable:hover { background:rgba(246,196,83,.08); }
-    .pill { display:inline-block; border:1px solid var(--line); background:rgba(255,255,255,.05); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:12px; margin:2px; }
-    .bar { height:10px; background:#243855; border-radius:999px; overflow:hidden; }
-    .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--green),var(--gold)); }
+    tr.clickable:hover { background:rgba(244,196,91,.1); }
+    .pill { display:inline-block; border:1px solid rgba(244,196,91,.28); background:rgba(0,0,0,.18); border-radius:999px; padding:3px 9px; color:#e8c988; font-size:12px; margin:2px; }
+    .bar { height:10px; background:#2f1c0e; border:1px solid rgba(244,196,91,.2); border-radius:999px; overflow:hidden; }
+    .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--green),var(--gold),#d98b35); }
     .muted { color:var(--muted); } .gold { color:var(--gold); } .green { color:var(--green); } .red { color:var(--red); }
     .list { display:grid; gap:8px; max-height:440px; overflow:auto; padding-right:4px; }
     .profile-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
-    .profile-card { padding:14px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.08); border-radius:16px; cursor:pointer; min-height:190px; display:flex; flex-direction:column; gap:10px; }
-    .profile-card:hover { border-color:var(--gold); background:rgba(246,196,83,.07); }
+    .profile-card { padding:14px; background:linear-gradient(180deg, rgba(241,215,154,.085), rgba(0,0,0,.16)); border:1px solid rgba(244,196,91,.2); border-radius:16px; cursor:pointer; min-height:190px; display:flex; flex-direction:column; gap:10px; }
+    .profile-card:hover { border-color:var(--gold); background:rgba(244,196,91,.11); transform:translateY(-1px); }
     .profile-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-    .profile-card p { margin:0; color:#d9e6fb; line-height:1.45; }
-    .personality-type { padding:10px; border:1px solid rgba(246,196,83,.22); background:rgba(246,196,83,.08); border-radius:13px; display:grid; gap:6px; }
+    .profile-card p { margin:0; color:#f3dfb5; line-height:1.45; }
+    .personality-type { padding:11px; border:1px solid rgba(244,196,91,.32); background:linear-gradient(180deg, rgba(244,196,91,.12), rgba(0,0,0,.14)); border-radius:13px; display:grid; gap:6px; }
     .personality-type strong { color:var(--gold); font-size:15px; }
     .personality-type > span { color:var(--muted); font-size:12px; }
-    .item { padding:10px 12px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); border-radius:12px; }
+    .item { padding:10px 12px; background:rgba(0,0,0,.18); border:1px solid rgba(244,196,91,.16); border-radius:12px; }
     .item small { color:var(--muted); display:block; margin-top:4px; }
-    dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:18px; background:#0e192b; color:var(--text); padding:0; }
-    dialog::backdrop { background:rgba(0,0,0,.6); backdrop-filter: blur(4px); }
-    .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px; border-bottom:1px solid var(--line); }
+    dialog { width:min(980px, calc(100vw - 28px)); border:2px solid var(--line); border-radius:18px; background:#160d07; color:var(--text); padding:0; box-shadow:0 20px 70px rgba(0,0,0,.58); }
+    dialog::backdrop { background:rgba(0,0,0,.68); backdrop-filter: blur(4px); }
+    .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px; border-bottom:2px solid var(--line); background:linear-gradient(180deg, #2e1b0d, #160d07); }
     .modal-body { padding:18px; max-height:75vh; overflow:auto; }
-    pre { white-space:pre-wrap; background:rgba(0,0,0,.18); border:1px solid var(--line); padding:12px; border-radius:12px; color:#dbe8ff; }
+    pre { white-space:pre-wrap; background:rgba(0,0,0,.28); border:1px solid rgba(244,196,91,.2); padding:12px; border-radius:12px; color:#f6dfad; }
+    ::selection { background:rgba(244,196,91,.35); }
     @media (max-width: 900px) { .span-8,.span-6,.span-4,.span-3 { grid-column:span 12; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>Captain Cutlass Dashboard</h1>
-  <div class="sub">Read-only view of crew personality profiles, Living Ship stats, world history, jobs, and achievements.</div>
+  <h1>Captain Cutlass Quarterdeck</h1>
+  <div class="sub">A captain's chart table for crew profiles, Living Ship stats, world history, jobs, and achievements.</div>
 </header>
 <main>
   <section class="toolbar card">
     <label>Server <select id="guildSelect"></select></label>
     <input id="memberSearch" placeholder="Filter crew by name, relationship, summary…" size="42">
-    <button id="refreshBtn">Refresh</button>
-    <button id="adminBtn" type="button" style="display:none">Users</button>
-    <button type="button" onclick="window.location.href='/logout'">Log out</button>
+    <button id="refreshBtn">Refresh Charts</button>
+    <button id="adminBtn" type="button" style="display:none">Crew Access</button>
+    <button type="button" onclick="window.location.href='/logout'">Leave Port</button>
     <span id="status" class="muted"></span>
   </section>
   <section id="content" class="grid"></section>
 </main>
 <dialog id="memberDialog"><div class="modal-head"><h2 id="memberTitle"></h2><button onclick="memberDialog.close()">Close</button></div><div id="memberBody" class="modal-body"></div></dialog>
-<dialog id="adminDialog"><div class="modal-head"><h2>Dashboard Users</h2><button onclick="adminDialog.close()">Close</button></div><div id="adminBody" class="modal-body"></div></dialog>
+<dialog id="adminDialog"><div class="modal-head"><h2>Quarterdeck Access</h2><button onclick="adminDialog.close()">Close</button></div><div id="adminBody" class="modal-body"></div></dialog>
 <script>
 const $ = id => document.getElementById(id);
 let overview = null;
@@ -1475,34 +1487,42 @@ LOGIN_HTML = r"""
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Captain Cutlass Dashboard Login</title>
+  <title>Captain Cutlass Quarterdeck Login</title>
   <style>
-    :root { color-scheme: dark; --bg:#08111f; --panel:#111c2e; --text:#e8f0ff; --muted:#9fb0c9; --gold:#f6c453; --red:#ff6b6b; --line:#263a5d; }
+    :root { color-scheme: dark; --bg:#0b0704; --panel:#1c120a; --paper:#f1d79a; --text:#f8ecd2; --muted:#c9a875; --gold:#f4c45b; --red:#d94b35; --line:#6f4921; }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background:radial-gradient(circle at top left, #142647, var(--bg) 55%); color:var(--text); }
-    main { width:min(430px, 100%); background:linear-gradient(180deg, rgba(23,38,64,.96), rgba(14,25,43,.96)); border:1px solid var(--line); border-radius:22px; padding:26px; box-shadow:0 18px 60px rgba(0,0,0,.35); }
-    h1 { margin:0 0 8px; font-size:30px; letter-spacing:-.03em; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; font-family:Georgia, 'Trebuchet MS', ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
+      radial-gradient(circle at 20% 10%, rgba(244,196,91,.2), transparent 30%),
+      radial-gradient(circle at 80% 0%, rgba(116,166,198,.12), transparent 26%),
+      linear-gradient(135deg, rgba(255,255,255,.035) 25%, transparent 25%) 0 0/42px 42px,
+      linear-gradient(180deg, #15100b 0%, var(--bg) 70%, #050302 100%); }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at center, transparent 34%, rgba(0,0,0,.62) 100%); }
+    main { width:min(440px, 100%); background:linear-gradient(180deg, rgba(47,29,13,.97), rgba(20,12,6,.98)); border:2px solid var(--line); border-radius:22px; padding:28px; box-shadow:0 22px 70px rgba(0,0,0,.55), inset 0 0 0 1px rgba(244,196,91,.1); position:relative; overflow:hidden; }
+    main::before { content:'⚓'; position:absolute; right:18px; top:10px; color:rgba(244,196,91,.16); font-size:82px; transform:rotate(-12deg); }
+    main > * { position:relative; }
+    h1 { margin:0 0 8px; font-size:32px; letter-spacing:.01em; color:var(--paper); text-shadow:0 2px 0 #000, 0 0 18px rgba(244,196,91,.25); }
+    h1::before { content:'☠ '; color:var(--gold); }
     p { margin:0 0 22px; color:var(--muted); line-height:1.5; }
     label { display:grid; gap:7px; margin:14px 0; color:var(--muted); }
-    input, button { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px 13px; font:inherit; }
-    input { background:#0c1728; color:var(--text); }
-    button { margin-top:8px; cursor:pointer; background:#1b3358; color:var(--text); }
-    button:hover { border-color:var(--gold); }
-    .error { margin-bottom:14px; padding:10px 12px; border:1px solid rgba(255,107,107,.35); background:rgba(255,107,107,.1); border-radius:12px; color:#ffd3d3; }
+    input, button { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px 13px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 2px 8px rgba(0,0,0,.25); }
+    input { background:#160d07; color:var(--text); }
+    button { margin-top:8px; cursor:pointer; background:linear-gradient(180deg, #8f5722, #553014); color:#fff4d7; border-color:#b07833; font-weight:700; text-shadow:0 1px #000; }
+    button:hover { border-color:var(--gold); box-shadow:0 0 0 2px rgba(244,196,91,.18), 0 8px 22px rgba(0,0,0,.28); }
+    .error { margin-bottom:14px; padding:10px 12px; border:1px solid rgba(217,75,53,.45); background:rgba(217,75,53,.12); border-radius:12px; color:#ffd3c7; }
     .gold { color:var(--gold); }
   </style>
 </head>
 <body>
   <main>
     <h1>Captain Cutlass</h1>
-    <p>Sign in to view the dashboard for crew profiles, Living Ship stats, world history, jobs, and achievements.</p>
+    <p>Show yer papers to enter the quarterdeck and inspect crew profiles, Living Ship stats, world history, jobs, and achievements.</p>
     {error}
     <form method="post" action="/login">
       <label>Username <input name="username" autocomplete="username" required autofocus></label>
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">Open Dashboard</button>
+      <button type="submit">Board the Quarterdeck</button>
     </form>
-    <p style="margin-top:18px;font-size:13px;">Session access uses an <span class="gold">HttpOnly</span> cookie. Token auth still works for API checks.</p>
+    <p style="margin-top:18px;font-size:13px;">Session access uses an <span class="gold">HttpOnly</span> ship seal. Token auth still works for API checks.</p>
   </main>
 </body>
 </html>
