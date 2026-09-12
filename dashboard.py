@@ -1741,6 +1741,8 @@ let sessionUser = null;
 let assessmentStatus = null;
 let selectedGuild = null;
 let currentView = 'server';
+let searchRenderTimer = null;
+const DASHBOARD_RENDER_LIMIT = 300;
 const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
 if (dashboardToken) localStorage.setItem('cutlassDashboardToken', dashboardToken);
 
@@ -1758,6 +1760,31 @@ async function apiJson(path, payload, method='POST') { return await api(path, { 
 function card(title, body, cls='span-12') { return `<div class="card ${cls}"><h2>${esc(title)}</h2>${body}</div>`; }
 function stat(label, value) { return `<div class="stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`; }
 function item(text, meta='') { return `<div class="item">${esc(text)}${meta ? `<small>${esc(meta)}</small>` : ''}</div>`; }
+function searchTextFor(value) {
+  try { return JSON.stringify(value || {}).toLowerCase(); }
+  catch { return String(value || '').toLowerCase(); }
+}
+function indexSearchRows(rows) {
+  (rows || []).forEach(row => { row._searchText = searchTextFor(row); });
+  return rows || [];
+}
+function visibleRows(rows) { return (rows || []).slice(0, DASHBOARD_RENDER_LIMIT); }
+function resultLimitNote(total, shown) {
+  if (total <= shown) return '';
+  return `<p class="muted">Showing first ${num(shown)} of ${num(total)} matches. Keep typing to narrow the list.</p>`;
+}
+function scheduleSearchRender() {
+  if (searchRenderTimer) clearTimeout(searchRenderTimer);
+  $('status').textContent = 'Filtering…';
+  searchRenderTimer = setTimeout(() => {
+    searchRenderTimer = null;
+    requestAnimationFrame(() => {
+      if (currentView === 'global') renderGlobal();
+      else if (guild) renderGuild();
+      $('status').textContent = 'Ready';
+    });
+  }, 180);
+}
 
 async function loadOverview() {
   $('status').textContent = 'Loading…';
@@ -1797,6 +1824,8 @@ async function loadGlobal() {
     api('/api/admin/assessment/status').catch(() => null),
   ]);
   globalData = loaded[0];
+  indexSearchRows(globalData.users || []);
+  indexSearchRows(globalData.multi_server_users || []);
   assessmentStatus = loaded[1];
   renderGlobal();
   refreshAssessmentStatus().catch(() => {});
@@ -1808,6 +1837,7 @@ async function loadGuild(guildId) {
   selectedGuild = guildId;
   $('status').textContent = 'Loading server…';
   guild = await api(`/api/guild/${guildId}`);
+  indexSearchRows(guild.members || []);
   renderGuild();
   $('status').textContent = `Loaded ${guild.guild_name || guildId}`;
 }
@@ -1815,6 +1845,8 @@ async function loadGuild(guildId) {
 function renderGlobal() {
   const counts = globalData.counts || {};
   const users = filterGlobalUsers(globalData.users || []);
+  const visibleUsers = visibleRows(users);
+  const userLimitNote = resultLimitNote(users.length, visibleUsers.length);
   $('content').innerHTML = `
     ${card('Global Overview', `
       <div class="stats">
@@ -1825,7 +1857,7 @@ function renderGlobal() {
     ${card('AI Message Assessment', assessmentPanel(assessmentStatus), 'span-12')}
     ${card('History Import Status', importStatusPanel(globalData.history_import_summary, globalData.history_imports, true), 'span-12')}
     ${card('Multi-Server Users', globalUserCards(globalData.multi_server_users || []), 'span-12')}
-    ${card('Global Crew Profiles', globalUserTable(users), 'span-12')}
+    ${card('Global Crew Profiles', userLimitNote + globalUserTable(visibleUsers), 'span-12')}
   `;
 }
 
@@ -1871,7 +1903,7 @@ async function refreshAssessmentStatus() {
 function filterGlobalUsers(users) {
   const q = $('memberSearch').value.trim().toLowerCase();
   if (!q) return users;
-  return users.filter(u => JSON.stringify(u).toLowerCase().includes(q));
+  return users.filter(u => (u._searchText || searchTextFor(u)).includes(q));
 }
 
 function globalUserCards(users) {
@@ -1909,6 +1941,8 @@ function renderGuild() {
   const shipSettings = guild.ship_settings || {};
   const counts = guild.counts || {};
   const members = filterMembers(guild.members || []);
+  const visibleMembers = visibleRows(members);
+  const memberLimitNote = resultLimitNote(members.length, visibleMembers.length);
   const maxHull = ship.level ? 100 + ((Number(ship.level)-1) * 10) : 100;
   $('content').innerHTML = `
     ${card('Living Ship', `
@@ -1928,8 +1962,8 @@ function renderGuild() {
     `, 'span-8')}
     ${card('Bot Controls', botControls(settings, shipSettings), 'span-12')}
     ${card('History Import Status', importStatusPanel(guild.history_import_summary, guild.history_imports, false), 'span-12')}
-    ${card('Crew Personality Profiles', personalityCards(members), 'span-12')}
-    ${card('Crew Table', memberTable(members), 'span-12')}
+    ${card('Crew Personality Profiles', memberLimitNote + personalityCards(visibleMembers), 'span-12')}
+    ${card('Crew Table', memberLimitNote + memberTable(visibleMembers), 'span-12')}
     ${card('Top Doubloons', simpleRows(guild.top_doubloons, ['username','doubloons']), 'span-6')}
     ${card('Ship Contributors', simpleRows(guild.top_contributors, ['username','amount']), 'span-6')}
     ${card('Crew Work Summary', simpleRows(guild.crew_work, ['job_label','total_runs','payout_total','repair_hull_total']), 'span-6')}
@@ -2017,7 +2051,7 @@ async function setDashboardMood() {
 function filterMembers(members) {
   const q = $('memberSearch').value.trim().toLowerCase();
   if (!q) return members;
-  return members.filter(m => JSON.stringify(m).toLowerCase().includes(q));
+  return members.filter(m => (m._searchText || searchTextFor(m)).includes(q));
 }
 
 function profileBlurb(m) {
@@ -2297,7 +2331,7 @@ $('guildSelect').addEventListener('change', e => loadSelected(e.target.value));
 $('refreshBtn').addEventListener('click', () => selectedGuild ? loadSelected(selectedGuild) : loadOverview());
 $('accountBtn').addEventListener('click', () => openAccountSettings());
 $('adminBtn').addEventListener('click', () => openAdminUsers().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); }));
-$('memberSearch').addEventListener('input', () => currentView === 'global' ? renderGlobal() : (guild && renderGuild()));
+$('memberSearch').addEventListener('input', () => scheduleSearchRender());
 loadOverview().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); });
 </script>
 </body>
