@@ -77,6 +77,39 @@ def _format_progress_row(row, channel_lookup=None):
     )
 
 
+def _format_server_summary(results, processed_channels, skipped_channels, *, stopped):
+    total_imported = sum(int(item.get("imported") or 0) for item in results if item)
+    total_scanned = sum(int(item.get("scanned") or 0) for item in results if item)
+    title = "**SERVER HISTORY IMPORT STOPPED**" if stopped else "**SERVER HISTORY IMPORT COMPLETE**"
+    lines = [
+        title,
+        "Channels processed: " + str(processed_channels),
+        "Channels skipped: " + str(skipped_channels),
+        "Messages imported: " + str(total_imported),
+        "Messages scanned: " + str(total_scanned),
+        "",
+    ]
+    sorted_results = sorted(
+        [item for item in results if item],
+        key=lambda item: int(item.get("imported") or 0),
+        reverse=True,
+    )
+    for item in sorted_results[:20]:
+        lines.append(
+            "• "
+            + str(item.get("mention") or item.get("channel_name") or item.get("channel_id"))
+            + " — "
+            + str(item.get("status") or "unknown")
+            + " | imported "
+            + str(item.get("imported") or 0)
+            + " / scanned "
+            + str(item.get("scanned") or 0)
+        )
+    if len(sorted_results) > 20:
+        lines.append("• ...and " + str(len(sorted_results) - 20) + " more channel(s).")
+    return "\n".join(lines)[:1900]
+
+
 async def _import_channel_history(
     status_channel,
     target_channel,
@@ -88,11 +121,25 @@ async def _import_channel_history(
     touch_member_seen,
     get_import_progress,
     upsert_import_progress,
+    announce=True,
 ):
     key = _key(target_channel.guild.id, target_channel.id)
     imported = 0
     scanned = 0
     last_seen_id = None
+    final_message = ""
+
+    def result(status, message=""):
+        return {
+            "channel_id": target_channel.id,
+            "channel_name": getattr(target_channel, "name", str(target_channel.id)),
+            "mention": target_channel.mention,
+            "status": status,
+            "imported": imported,
+            "scanned": scanned,
+            "last_message_id": last_seen_id,
+            "message": message,
+        }
 
     try:
         progress = await get_import_progress(target_channel.guild.id, target_channel.id)
@@ -113,10 +160,10 @@ async def _import_channel_history(
                     target_channel.id,
                     status="stopped",
                 )
-                await status_channel.send(
-                    "History import stopped for " + target_channel.mention + ". Imported " + str(imported) + " new messages this run."
-                )
-                return
+                final_message = "History import stopped for " + target_channel.mention + ". Imported " + str(imported) + " new messages this run."
+                if announce:
+                    await status_channel.send(final_message)
+                return result("stopped", final_message)
 
             remaining = None if limit is None else limit - scanned
             if remaining is not None and remaining <= 0:
@@ -125,10 +172,10 @@ async def _import_channel_history(
                     target_channel.id,
                     status="paused",
                 )
-                await status_channel.send(
-                    "History import paused for " + target_channel.mention + ". Limit reached. Imported " + str(imported) + " new messages this run. Run the command again to continue."
-                )
-                return
+                final_message = "History import paused for " + target_channel.mention + ". Limit reached. Imported " + str(imported) + " new messages this run. Run the command again to continue."
+                if announce:
+                    await status_channel.send(final_message)
+                return result("paused", final_message)
 
             batch_limit = 100 if remaining is None else min(100, remaining)
             batch = []
@@ -145,10 +192,10 @@ async def _import_channel_history(
                     target_channel.id,
                     status="complete",
                 )
-                await status_channel.send(
-                    "History import complete for " + target_channel.mention + ". Imported " + str(imported) + " new messages this run."
-                )
-                return
+                final_message = "History import complete for " + target_channel.mention + ". Imported " + str(imported) + " new messages this run."
+                if announce:
+                    await status_channel.send(final_message)
+                return result("complete", final_message)
 
             batch_imported = 0
             batch_scanned = 0
@@ -214,14 +261,20 @@ async def _import_channel_history(
             target_channel.id,
             status="failed",
         )
-        await status_channel.send("I cannot read message history in " + target_channel.mention + ". Check my channel permissions.")
+        final_message = "I cannot read message history in " + target_channel.mention + ". Check my channel permissions."
+        if announce:
+            await status_channel.send(final_message)
+        return result("failed", final_message)
     except Exception as error:
         await upsert_import_progress(
             target_channel.guild.id,
             target_channel.id,
             status="failed",
         )
-        await status_channel.send("History import failed for " + target_channel.mention + ": " + repr(error)[:500])
+        final_message = "History import failed for " + target_channel.mention + ": " + repr(error)[:500]
+        if announce:
+            await status_channel.send(final_message)
+        return result("failed", final_message)
     finally:
         _ACTIVE_IMPORTS.pop(key, None)
         _STOP_REQUESTS.discard(key)
@@ -243,6 +296,7 @@ async def _import_server_history(
     channels = _readable_history_channels(guild)
     imported_channels = 0
     skipped_channels = 0
+    results = []
 
     try:
         if not channels:
@@ -251,13 +305,7 @@ async def _import_server_history(
 
         for target_channel in channels:
             if server_key in _SERVER_STOP_REQUESTS:
-                await status_channel.send(
-                    "Server history import stopped. Processed "
-                    + str(imported_channels)
-                    + " channel(s); skipped "
-                    + str(skipped_channels)
-                    + "."
-                )
+                await status_channel.send(_format_server_summary(results, imported_channels, skipped_channels, stopped=True))
                 return
 
             key = _key(guild.id, target_channel.id)
@@ -276,20 +324,16 @@ async def _import_server_history(
                     touch_member_seen=touch_member_seen,
                     get_import_progress=get_import_progress,
                     upsert_import_progress=upsert_import_progress,
+                    announce=False,
                 )
             )
             _ACTIVE_IMPORTS[key] = task
             imported_channels += 1
-            await task
+            channel_result = await task
+            results.append(channel_result)
             await asyncio.sleep(0.5)
 
-        await status_channel.send(
-            "Server history import finished. Processed "
-            + str(imported_channels)
-            + " readable channel(s); skipped "
-            + str(skipped_channels)
-            + " already-active channel(s)."
-        )
+        await status_channel.send(_format_server_summary(results, imported_channels, skipped_channels, stopped=False))
     finally:
         _ACTIVE_SERVER_IMPORTS.pop(server_key, None)
         _SERVER_STOP_REQUESTS.discard(server_key)
