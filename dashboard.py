@@ -2206,10 +2206,12 @@ async function openMember(guildId, userId) {
 }
 
 let adminAccessOptions = {guilds: []};
+let dashboardAdminUsers = [];
 
 async function openAdminUsers() {
   const data = await api('/api/admin/users');
   adminAccessOptions = data.options || {guilds: []};
+  dashboardAdminUsers = data.users || [];
   $('adminBody').innerHTML = `
     <div class="card span-12">
       <h3>Create User</h3>
@@ -2217,10 +2219,14 @@ async function openAdminUsers() {
         <input id="newDashUser" placeholder="username">
         <input id="newDashPass" type="password" placeholder="password">
         <select id="newDashRole"><option value="user">User</option><option value="admin">Admin</option></select>
-        <select id="newDashScope"><option value="selected">Selected servers</option><option value="global">Global only</option><option value="all">All access</option></select>
+        <select id="newDashScope" onchange="toggleNewUserAccessPicker()"><option value="global">Global only</option><option value="all">All access</option><option value="selected">Selected servers</option></select>
         <button type="button" onclick="createDashboardUserFromForm()">Create</button>
       </div>
-      <div class="access-grid">${accessCheckboxes('newDashGuild', [])}</div>
+      <div id="newDashAccessPanel" style="display:none">
+        <button type="button" onclick="loadAccessCheckboxes('newDashGuild', [])">Load Server List</button>
+        <div id="newDashGuild_box" class="access-grid"><p class="muted">Server list is loaded only when needed.</p></div>
+      </div>
+      <p id="adminUserStatus" class="muted"></p>
       <p class="muted">Admins always see everything. Regular users can be limited to global info, selected servers, or all dashboard data.</p>
     </div>
     <div class="card span-12"><h3>Existing Users</h3>${dashboardUsersTable(data.users || [])}</div>
@@ -2248,6 +2254,29 @@ function accessCheckboxes(prefix, selected) {
   }).join('');
 }
 
+function loadAccessCheckboxes(prefix, selected) {
+  const target = $(`${prefix}_box`);
+  if (!target) return;
+  target.dataset.loaded = '1';
+  target.innerHTML = accessCheckboxes(prefix, selected || []);
+}
+
+function dashboardUserByName(username) {
+  return (dashboardAdminUsers || []).find(u => String(u.username) === String(username)) || null;
+}
+
+function loadAccessCheckboxesForUser(username, prefix) {
+  const user = dashboardUserByName(username);
+  const access = (user && user.access) || {};
+  loadAccessCheckboxes(prefix, access.guild_ids || []);
+}
+
+function toggleNewUserAccessPicker() {
+  const panel = $('newDashAccessPanel');
+  if (!panel) return;
+  panel.style.display = $('newDashScope').value === 'selected' ? '' : 'none';
+}
+
 function selectedGuildAccess(prefix) {
   return Array.from(document.querySelectorAll(`input[data-access-prefix="${prefix}"]:checked`)).map(input => input.value);
 }
@@ -2264,7 +2293,8 @@ function dashboardUsersTable(users) {
       <td>
         <label class="access-toggle"><input id="${prefix}_all" type="checkbox" ${access.all ? 'checked' : ''}> All access</label>
         <label class="access-toggle"><input id="${prefix}_global" type="checkbox" ${access.global ? 'checked' : ''}> Global info</label>
-        <div class="access-grid">${accessCheckboxes(prefix, access.guild_ids || [])}</div>
+        <button type="button" onclick="loadAccessCheckboxesForUser('${esc(u.username)}','${prefix}')">Edit Servers</button>
+        <div id="${prefix}_box" class="access-grid" data-loaded="0"><p class="muted">Server list hidden until Edit Servers is clicked.</p></div>
         <button type="button" onclick="saveDashboardAccess('${esc(u.username)}','${prefix}')">Save Access</button>
       </td>
       <td>
@@ -2277,25 +2307,36 @@ function dashboardUsersTable(users) {
 }
 
 async function createDashboardUserFromForm() {
-  const username = $('newDashUser').value;
+  const username = $('newDashUser').value.trim();
   const password = $('newDashPass').value;
   const role = $('newDashRole').value;
   const scope = $('newDashScope').value;
+  const status = $('adminUserStatus');
   const access = {
     all: scope === 'all',
     global: scope === 'all' || scope === 'global',
     guild_ids: scope === 'selected' ? selectedGuildAccess('newDashGuild') : [],
   };
-  await apiJson('/api/admin/users', {username, password, role, access});
-  await openAdminUsers();
+  try {
+    status.textContent = 'Creating user…';
+    await apiJson('/api/admin/users', {username, password, role, access});
+    status.textContent = 'User created';
+    await openAdminUsers();
+  } catch (err) {
+    status.textContent = `Create failed: ${err.message}`;
+  }
 }
 
 async function saveDashboardAccess(username, prefix) {
   const role = $(`${prefix}_role`).value;
+  const box = $(`${prefix}_box`);
+  const existing = dashboardUserByName(username);
+  const existingAccess = (existing && existing.access) || {};
+  const guildIds = box && box.dataset.loaded === '1' ? selectedGuildAccess(prefix) : (existingAccess.guild_ids || []);
   const access = {
     all: $(`${prefix}_all`).checked,
     global: $(`${prefix}_global`).checked,
-    guild_ids: selectedGuildAccess(prefix),
+    guild_ids: guildIds,
   };
   await apiJson('/api/admin/users/access', {username, role, access});
   await openAdminUsers();
