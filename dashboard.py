@@ -429,6 +429,11 @@ INDEX_HTML = r"""
     .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--green),var(--gold)); }
     .muted { color:var(--muted); } .gold { color:var(--gold); } .green { color:var(--green); } .red { color:var(--red); }
     .list { display:grid; gap:8px; max-height:440px; overflow:auto; padding-right:4px; }
+    .profile-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+    .profile-card { padding:14px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.08); border-radius:16px; cursor:pointer; min-height:190px; display:flex; flex-direction:column; gap:10px; }
+    .profile-card:hover { border-color:var(--gold); background:rgba(246,196,83,.07); }
+    .profile-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .profile-card p { margin:0; color:#d9e6fb; line-height:1.45; }
     .item { padding:10px 12px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); border-radius:12px; }
     .item small { color:var(--muted); display:block; margin-top:4px; }
     dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:18px; background:#0e192b; color:var(--text); padding:0; }
@@ -520,7 +525,8 @@ function renderGuild() {
         ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
-    ${card('Crew Personality Profiles', memberTable(members), 'span-12')}
+    ${card('Crew Personality Profiles', personalityCards(members), 'span-12')}
+    ${card('Crew Table', memberTable(members), 'span-12')}
     ${card('Top Doubloons', simpleRows(guild.top_doubloons, ['username','doubloons']), 'span-6')}
     ${card('Ship Contributors', simpleRows(guild.top_contributors, ['username','amount']), 'span-6')}
     ${card('Crew Work Summary', simpleRows(guild.crew_work, ['job_label','total_runs','payout_total','repair_hull_total']), 'span-6')}
@@ -536,6 +542,36 @@ function filterMembers(members) {
   const q = $('memberSearch').value.trim().toLowerCase();
   if (!q) return members;
   return members.filter(m => JSON.stringify(m).toLowerCase().includes(q));
+}
+
+function profileBlurb(m) {
+  const parts = [];
+  if (m.summary) parts.push(m.summary);
+  if (m.opinion) parts.push(m.opinion);
+  if (m.nickname && m.nickname.toLowerCase() !== 'none') parts.push(`Nickname: ${m.nickname}`);
+  if (!parts.length) parts.push('No written summary yet; open the profile to inspect memories, jokes, events, achievements, and work history.');
+  return parts.join(' ');
+}
+
+function personalityCards(members) {
+  if (!members.length) return '<p class="muted">No personality data found for this server. Choose a server with crew/profile counts from the Server dropdown above.</p>';
+  return `<div class="profile-grid">${members.map(m => `
+    <article class="profile-card" onclick="openMember('${m.guild_id}','${m.user_id}')">
+      <div class="profile-head">
+        <div><h3>${esc(m.username || m.user_id)}</h3><span class="muted">${esc(m.relationship_type || 'Crewmate')}</span></div>
+        <strong class="gold">${num(m.familiarity)}/100</strong>
+      </div>
+      <p>${esc(profileBlurb(m))}</p>
+      <div>
+        ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
+        ${m.pronouns ? `<span class="pill">Pronouns: ${esc(m.pronouns)}</span>` : ''}
+        <span class="pill">${num(m.memory_count)} memories</span>
+        <span class="pill">${num(m.joke_count)} jokes</span>
+        <span class="pill">${num(m.achievement_count)} achievements</span>
+        <span class="pill">${num(m.doubloons)} doubloons</span>
+        <span class="pill">${num(m.work_runs)} jobs</span>
+      </div>
+    </article>`).join('')}</div>`;
 }
 
 function memberTable(members) {
@@ -567,11 +603,11 @@ async function openMember(guildId, userId) {
   $('memberTitle').textContent = `${rel.username || profile.username || userId}`;
   $('memberBody').innerHTML = `
     <div class="grid">
-      <div class="card span-6"><h3>Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
+      <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
-      <div class="card span-6"><h3>Memories</h3><div class="list">${data.memories.map(m => item(m.memory, `confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
-      <div class="card span-6"><h3>Running Jokes</h3><div class="list">${data.running_jokes.map(j => item(j.joke, j.created_at || '')).join('') || '<p class="muted">None yet.</p>'}</div></div>
-      <div class="card span-6"><h3>Relationship Events</h3><div class="list">${data.relationship_events.map(e => item(e.event, `importance ${e.importance || 0} • ${e.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Personality Memories</h3><div class="list">${data.memories.map(m => item(m.memory, `confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Running Jokes / Humor Profile</h3><div class="list">${data.running_jokes.map(j => item(j.joke, j.created_at || '')).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Relationship Events / History</h3><div class="list">${data.relationship_events.map(e => item(e.event, `importance ${e.importance || 0} • ${e.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Crew Work</h3>${simpleRows(data.crew_work, ['job_label','total_runs','success_count','failure_count','rare_count','payout_total','repair_hull_total'])}</div>
     </div>`;
   memberDialog.showModal();
