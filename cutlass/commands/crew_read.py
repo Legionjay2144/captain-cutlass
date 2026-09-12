@@ -138,9 +138,15 @@ async def build_member_crew_read(guild_id, user_id):
         "SELECT achievement || CASE WHEN description IS NOT NULL AND description != '' THEN ': ' || description ELSE '' END FROM achievements WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10",
         (guild_id, user_id),
     )
+    cursor = await db.execute(
+        "SELECT COUNT(*) FROM messages WHERE guild_id=? AND user_id=?",
+        (guild_id, user_id),
+    )
+    message_count_row = await cursor.fetchone()
+    total_message_count = int(message_count_row[0] or 0)
     messages = await _fetch_text_rows(
         db,
-        "SELECT content FROM messages WHERE guild_id=? AND user_id=? AND content IS NOT NULL AND content != '' ORDER BY id DESC LIMIT 80",
+        "SELECT content FROM messages WHERE guild_id=? AND user_id=? AND content IS NOT NULL AND content != '' ORDER BY id ASC",
         (guild_id, user_id),
     )
 
@@ -161,7 +167,8 @@ async def build_member_crew_read(guild_id, user_id):
     base["memory_count"] = len(memories)
     base["joke_count"] = len(jokes)
     base["achievement_count"] = len(achievements)
-    base["message_count"] = len(messages)
+    base["message_count"] = total_message_count
+    base["messages_analyzed"] = len(messages)
 
     signal_parts = []
     for key in ("relationship_type", "nickname", "opinion", "summary"):
@@ -212,7 +219,7 @@ def format_member_crew_read(target, data):
         "Personality type: **" + personality["label"] + "** (" + str(personality["confidence"]) + "% confidence)",
         "Traits: " + ", ".join(personality["traits"]),
         "Relationship: " + str(base.get("relationship_type") or "Unknown") + " | Familiarity: " + str(base.get("familiarity") or 0) + "/100",
-        "Signals: " + str(personality["signal_count"]) + " total signals, " + str(base.get("message_count", 0)) + " recent messages, " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
+        "Signals: " + str(personality["signal_count"]) + " total signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
     ]
 
     if personality["secondary"]:

@@ -103,7 +103,7 @@ def collect_member_signal_text(conn, guild_id, user_id, base=None):
         ("running_jokes", "joke", "ORDER BY id DESC LIMIT 5"),
         ("relationship_events", "event", "ORDER BY importance DESC, id DESC LIMIT 6"),
         ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY id DESC LIMIT 8"),
-        ("messages", "content", "ORDER BY id DESC LIMIT 80"),
+        ("messages", "content", "ORDER BY id ASC"),
     )
 
     for table, column, order in signal_queries:
@@ -781,7 +781,7 @@ function personalityCards(members) {
       <div>
         ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
         ${m.pronouns ? `<span class="pill">Pronouns: ${esc(m.pronouns)}</span>` : ''}
-        <span class="pill">${num(m.message_count)} messages</span>
+        <span class="pill">${num(m.message_count)} lifetime messages</span>
         <span class="pill">${num(m.memory_count)} memories</span>
         <span class="pill">${num(m.joke_count)} jokes</span>
         <span class="pill">${num(m.achievement_count)} achievements</span>
@@ -799,7 +799,7 @@ function memberTable(members) {
       <td>${esc(m.relationship_type || '')}<br><span class="pill">Familiarity ${num(m.familiarity)}</span>${m.nickname ? `<span class="pill">${esc(m.nickname)}</span>` : ''}</td>
       <td><b>${esc((m.personality_type && m.personality_type.label) || 'Unclassified')}</b><br>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
       <td>${num(m.doubloons)}</td>
-      <td><span class="pill">${num(m.message_count)} messages</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
+      <td><span class="pill">${num(m.message_count)} lifetime messages</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -820,7 +820,7 @@ async function openMember(guildId, userId) {
   $('memberTitle').textContent = `${rel.username || profile.username || userId}`;
   $('memberBody').innerHTML = `
     <div class="grid">
-      <div class="card span-12"><h3>Generalized Personality Type</h3>${personalityBadge(data.personality_type)}<pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
+      <div class="card span-12"><h3>Generalized Personality Type</h3>${personalityBadge(data.personality_type)}<p class="muted">Built from the member’s full stored message history plus memories, jokes, relationship events, achievements, and crew activity.</p><pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Personality Memories</h3><div class="list">${data.memories.map(m => item(m.memory, `confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
