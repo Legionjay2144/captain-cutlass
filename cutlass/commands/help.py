@@ -502,6 +502,16 @@ async def handle_help_command(
         )
 
         embed.add_field(
+            name="History Import",
+            value=(
+                "`!cutlass history import [#channel] [limit|all]`\n"
+                "`!cutlass history import status`\n"
+                "`!cutlass history import stop [#channel]`"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
             name="Ship World Configuration",
             value=(
                 "`!cutlass ship channel #channel`\n"
@@ -668,6 +678,9 @@ async def handle_help_command(
                 "`!c testwelcome`\n"
                 "`!c returners status/on/off/days <days>`\n"
                 "`!c log status/channel/on/off`\n"
+                "`!c history import [#channel] [limit|all]`\n"
+                "`!c history import status`\n"
+                "`!c history import stop [#channel]`\n"
                 "`!c crew read @user`\n"
                 "`!c chronicle now`\n"
                 "`!c ship channel/on/off/status`\n"

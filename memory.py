@@ -402,9 +402,17 @@ async def initialize_database():
                 user_id INTEGER,
                 username TEXT,
                 content TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                discord_message_id INTEGER,
+                imported_at DATETIME
             )
         """)
+
+        if not await column_exists(db, "messages", "discord_message_id"):
+            await db.execute("ALTER TABLE messages ADD COLUMN discord_message_id INTEGER")
+
+        if not await column_exists(db, "messages", "imported_at"):
+            await db.execute("ALTER TABLE messages ADD COLUMN imported_at DATETIME")
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_profiles (
@@ -692,6 +700,21 @@ async def initialize_database():
         """)
 
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS history_imports (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                status TEXT DEFAULT 'idle',
+                last_message_id INTEGER,
+                imported_count INTEGER DEFAULT 0,
+                scanned_count INTEGER DEFAULT 0,
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                stopped_at DATETIME,
+                PRIMARY KEY (guild_id, channel_id)
+            )
+        """)
+
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS treasure_hunts (
                 guild_id INTEGER PRIMARY KEY,
                 active INTEGER DEFAULT 0,
@@ -748,6 +771,16 @@ async def initialize_database():
             ON messages (
                 timestamp
             )
+        """)
+
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_discord_message
+            ON messages (
+                guild_id,
+                channel_id,
+                discord_message_id
+            )
+            WHERE discord_message_id IS NOT NULL
         """)
 
         await db.execute("""
@@ -840,7 +873,10 @@ async def save_message(
     channel_id,
     user_id,
     username,
-    content
+    content,
+    discord_message_id=None,
+    timestamp=None,
+    imported=False
 ):
 
     if not content:
@@ -853,25 +889,93 @@ async def save_message(
     async with _write_lock:
 
         cursor = await db.execute("""
-            INSERT INTO messages (
+            INSERT OR IGNORE INTO messages (
                 guild_id,
                 channel_id,
                 user_id,
                 username,
-                content
+                content,
+                discord_message_id,
+                timestamp,
+                imported_at
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
         """, (
             guild_id,
             channel_id,
             user_id,
             username,
-            content
+            content,
+            discord_message_id,
+            timestamp,
+            1 if imported else 0
         ))
 
         await db.commit()
 
-        return cursor.lastrowid
+        return cursor.lastrowid if cursor.rowcount else None
+
+
+async def get_import_progress(guild_id, channel_id):
+
+    db = await get_db()
+
+    cursor = await db.execute("""
+        SELECT guild_id, channel_id, status, last_message_id, imported_count, scanned_count, started_at, updated_at, stopped_at
+        FROM history_imports
+        WHERE guild_id = ?
+        AND channel_id = ?
+        LIMIT 1
+    """, (guild_id, channel_id))
+
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def upsert_import_progress(guild_id, channel_id, *, status, last_message_id=None, imported_delta=0, scanned_delta=0):
+
+    db = await get_db()
+
+    async with _write_lock:
+
+        await db.execute("""
+            INSERT INTO history_imports (
+                guild_id, channel_id, status, last_message_id, imported_count, scanned_count, started_at, updated_at, stopped_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CASE WHEN ? IN ('stopped', 'complete', 'failed') THEN CURRENT_TIMESTAMP ELSE NULL END)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                status = excluded.status,
+                last_message_id = COALESCE(excluded.last_message_id, history_imports.last_message_id),
+                imported_count = history_imports.imported_count + excluded.imported_count,
+                scanned_count = history_imports.scanned_count + excluded.scanned_count,
+                updated_at = CURRENT_TIMESTAMP,
+                stopped_at = CASE WHEN excluded.status IN ('stopped', 'complete', 'failed') THEN CURRENT_TIMESTAMP ELSE NULL END
+        """, (
+            guild_id,
+            channel_id,
+            status,
+            last_message_id,
+            imported_delta,
+            scanned_delta,
+            status,
+        ))
+
+        await db.commit()
+
+
+async def list_import_progress(guild_id):
+
+    db = await get_db()
+
+    cursor = await db.execute("""
+        SELECT guild_id, channel_id, status, last_message_id, imported_count, scanned_count, started_at, updated_at, stopped_at
+        FROM history_imports
+        WHERE guild_id = ?
+        ORDER BY updated_at DESC
+    """, (guild_id,))
+
+    rows = await cursor.fetchall()
+    return [dict(row) for row in rows]
 
 
 async def get_recent_messages(

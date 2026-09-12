@@ -11,6 +11,7 @@ import discord
 from cutlass.commands.help import handle_help_command
 from cutlass.commands.crew import handle_crew_command
 from cutlass.commands.crew_read import handle_crew_read_command
+from cutlass.commands.history_import import handle_history_import_command
 from cutlass.commands.lore import handle_lore_command
 from cutlass.commands.chronicle import handle_chronicle_command
 from cutlass.commands.welcome import handle_welcome_command
@@ -254,6 +255,9 @@ from memory import (
     ensure_member_meta,
     get_member_meta,
     touch_member_seen,
+    get_import_progress,
+    upsert_import_progress,
+    list_import_progress,
     mark_return_greeted,
     set_birthday,
     clear_birthday,
@@ -4635,6 +4639,22 @@ async def handle_commands(
         return True
 
 
+    if await handle_history_import_command(
+        message,
+        content,
+        command,
+        is_admin=is_admin,
+        save_message=save_message,
+        ensure_user_profile=ensure_user_profile,
+        ensure_relationship=ensure_relationship,
+        touch_member_seen=touch_member_seen,
+        get_import_progress=get_import_progress,
+        upsert_import_progress=upsert_import_progress,
+        list_import_progress=list_import_progress,
+    ):
+        return True
+
+
     if await handle_admin_command(
         message,
         command,
@@ -6532,7 +6552,9 @@ async def on_message(
             message.channel.id,
             message.author.id,
             message.author.display_name,
-            message.content
+            message.content,
+            discord_message_id=message.id,
+            timestamp=message.created_at.isoformat()
         )
 
         await maybe_parrot_spontaneous(
