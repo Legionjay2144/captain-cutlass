@@ -1281,6 +1281,39 @@ async def analyze_message(
         .strip()
     )
 
+    greeting_text = re.sub(
+        rf"<@!?{bot.user.id if bot.user else 0}>",
+        "",
+        message.content,
+    ).strip().lower()
+    greeting_text = re.sub(r"[^a-z\s']+", " ", greeting_text)
+    greeting_text = re.sub(r"\s+", " ", greeting_text).strip()
+
+    if force_reply and greeting_text in {
+        "hi",
+        "hello",
+        "hey",
+        "ahoy",
+        "yo",
+        "sup",
+        "hiya",
+        "good morning",
+        "good evening",
+    }:
+        return {
+            "respond": True,
+            "memory": None,
+            "relationship": None,
+            "opinion": None,
+            "nickname": None,
+            "joke": None,
+            "event": None,
+            "server_lore": None,
+            "lore": None,
+            "reply": f"Ahoy, {message.author.display_name}!",
+            "suppress_parrot_banter": True
+        }
+
     recorded_story_request = (
         (
             "story" in content_lower
@@ -3128,6 +3161,21 @@ def normalize_creator_address_reply(
             + CREATOR_NAME
             + match.group("suffix")
         )
+
+    reply = re.sub(
+        rf"\b({re.escape(CREATOR_NAME)})\s+back\s+at\s+(?:ye|you),?\s+{re.escape(CREATOR_NAME)}\b",
+        rf"\1",
+        reply,
+        flags=re.IGNORECASE,
+    )
+
+    reply = re.sub(
+        rf"\b({re.escape(CREATOR_NAME)})\b(?:[^.!?]{{0,24}}\b{re.escape(CREATOR_NAME)}\b)+",
+        rf"\1",
+        reply,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
     return reply
 
