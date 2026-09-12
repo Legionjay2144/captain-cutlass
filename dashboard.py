@@ -482,6 +482,106 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
     return data
 
 
+def is_dashboard_bot_user(conn, user_id):
+    names = []
+    for table in ("messages", "relationships", "user_profiles"):
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(f"SELECT DISTINCT username FROM {table} WHERE user_id=?", (user_id,)):
+            if row[0]:
+                names.append(str(row[0]).lower())
+    return any(name in ("captain-cutlass", "captain cutlass") or name.startswith("captain-cutlass#") for name in names)
+
+
+def global_user_ids(conn):
+    ids = set()
+    for table in ("messages", "relationships", "user_profiles", "user_memories", "running_jokes", "achievements", "economy", "crew_work_stats"):
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(f"SELECT DISTINCT user_id FROM {table} WHERE user_id IS NOT NULL"):
+            ids.add(row[0])
+    return sorted(user_id for user_id in ids if not is_dashboard_bot_user(conn, user_id))
+
+
+def global_counts(conn):
+    def count(table):
+        if not table_exists(conn, table):
+            return 0
+        return scalar(conn, f"SELECT COUNT(*) FROM {table}")
+
+    return {
+        "global_users": len(global_user_ids(conn)),
+        "servers": len(guild_ids(conn)),
+        "messages": count("messages"),
+        "profiles": count("user_profiles"),
+        "memories": count("user_memories"),
+        "running_jokes": count("running_jokes"),
+        "relationship_events": count("relationship_events"),
+        "achievements": count("achievements"),
+        "crew_work_runs": count("crew_work_runs"),
+    }
+
+
+def global_user_rows(conn, limit=LIST_LIMIT):
+    result = []
+    for user_id in global_user_ids(conn)[: limit * 3]:
+        profile = global_member_profile(conn, user_id)
+        base = profile["base"]
+        name = base.get("usernames", [str(user_id)])
+        username = name[0] if name else str(user_id)
+        result.append({
+            "user_id": user_id,
+            "username": username,
+            "guild_count": base.get("guild_count", 0),
+            "message_count": base.get("message_count", 0),
+            "memory_count": base.get("memory_count", 0),
+            "joke_count": base.get("joke_count", 0),
+            "achievement_count": base.get("achievement_count", 0),
+            "work_runs": base.get("work_runs", 0),
+            "usernames": base.get("usernames", []),
+            "guild_ids": base.get("guild_ids", []),
+            "personality_type": profile.get("personality_type"),
+        })
+    result.sort(key=lambda item: (item["guild_count"], item["message_count"], item["memory_count"]), reverse=True)
+    return result[:limit]
+
+
+def global_member_payload(user_id):
+    with db_connect() as conn:
+        profile = global_member_profile(conn, user_id)
+        base = profile["base"]
+        local_profiles = []
+        for guild_id in base.get("guild_ids", []):
+            local_profiles.append({
+                "guild_id": guild_id,
+                "profile": one(conn, "SELECT username, summary, gender, pronouns, updated_at FROM user_profiles WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "user_profiles") else None,
+                "relationship": one(conn, "SELECT username, nickname, relationship_type, familiarity, opinion, updated_at FROM relationships WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "relationships") else None,
+                "economy": one(conn, "SELECT doubloons FROM economy WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "economy") else None,
+                "message_count": scalar(conn, "SELECT COUNT(*) FROM messages WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "messages") else 0,
+                "memory_count": scalar(conn, "SELECT COUNT(*) FROM user_memories WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "user_memories") else 0,
+                "achievement_count": scalar(conn, "SELECT COUNT(*) FROM achievements WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "achievements") else 0,
+            })
+        return {
+            "user_id": user_id,
+            "global_profile": profile,
+            "local_profiles": local_profiles,
+            "recent_messages": rows(conn, "SELECT guild_id, username, content, timestamp FROM messages WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)) if table_exists(conn, "messages") else [],
+            "memories": rows(conn, "SELECT guild_id, memory, confidence, created_at, updated_at FROM user_memories WHERE user_id=? ORDER BY id DESC LIMIT 80", (user_id,)) if table_exists(conn, "user_memories") else [],
+            "running_jokes": rows(conn, "SELECT guild_id, joke, created_at FROM running_jokes WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)) if table_exists(conn, "running_jokes") else [],
+            "achievements": rows(conn, "SELECT guild_id, achievement, description, awarded_at FROM achievements WHERE user_id=? ORDER BY id DESC LIMIT 80", (user_id,)) if table_exists(conn, "achievements") else [],
+        }
+
+
+def global_payload():
+    with db_connect() as conn:
+        users = global_user_rows(conn)
+        return {
+            "counts": global_counts(conn),
+            "users": users,
+            "multi_server_users": [user for user in users if user.get("guild_count", 0) > 1],
+        }
+
+
 def guild_summary(conn, guild_id):
     settings = one(conn, "SELECT * FROM guild_settings WHERE guild_id=?", (guild_id,)) if table_exists(conn, "guild_settings") else None
     ship = one(conn, "SELECT * FROM ships WHERE guild_id=?", (guild_id,)) if table_exists(conn, "ships") else None
@@ -749,7 +849,9 @@ INDEX_HTML = r"""
 const $ = id => document.getElementById(id);
 let overview = null;
 let guild = null;
+let globalData = null;
 let selectedGuild = null;
+let currentView = 'server';
 const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
 if (dashboardToken) localStorage.setItem('cutlassDashboardToken', dashboardToken);
 
@@ -771,22 +873,87 @@ async function loadOverview() {
   $('status').textContent = 'Loading…';
   overview = await api('/api/overview');
   const select = $('guildSelect');
-  select.innerHTML = overview.guilds.map(g => {
+  select.innerHTML = `<option value="__global__">Global Info — all servers and matched users</option>` + overview.guilds.map(g => {
     const counts = g.counts || {};
     const shipName = (g.ship && g.ship.name) || 'No ship';
     return `<option value="${g.guild_id}">${g.guild_id} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
   }).join('');
-  selectedGuild = select.value || (overview.guilds[0] && overview.guilds[0].guild_id);
-  if (selectedGuild) await loadGuild(selectedGuild);
+  selectedGuild = select.value || '__global__';
+  await loadSelected(selectedGuild);
   $('status').textContent = 'Ready';
 }
 
+async function loadSelected(value) {
+  if (value === '__global__') return await loadGlobal();
+  return await loadGuild(value);
+}
+
+async function loadGlobal() {
+  currentView = 'global';
+  selectedGuild = '__global__';
+  $('status').textContent = 'Loading global info…';
+  globalData = await api('/api/global');
+  renderGlobal();
+  $('status').textContent = 'Loaded global info';
+}
+
 async function loadGuild(guildId) {
+  currentView = 'server';
   selectedGuild = guildId;
   $('status').textContent = 'Loading server…';
   guild = await api(`/api/guild/${guildId}`);
   renderGuild();
   $('status').textContent = `Loaded ${guildId}`;
+}
+
+function renderGlobal() {
+  const counts = globalData.counts || {};
+  const users = filterGlobalUsers(globalData.users || []);
+  $('content').innerHTML = `
+    ${card('Global Overview', `
+      <div class="stats">
+        ${stat('Global Users', counts.global_users || 0)}${stat('Servers', counts.servers || 0)}${stat('Messages', counts.messages || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Memories', counts.memories || 0)}${stat('Jokes', counts.running_jokes || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+      </div>
+      <p class="muted">Global profiles are matched by Discord user_id. Server-specific relationships, permissions, economy, and gameplay stay separate.</p>
+    `, 'span-12')}
+    ${card('Multi-Server Users', globalUserCards(globalData.multi_server_users || []), 'span-12')}
+    ${card('Global Crew Profiles', globalUserTable(users), 'span-12')}
+  `;
+}
+
+function filterGlobalUsers(users) {
+  const q = $('memberSearch').value.trim().toLowerCase();
+  if (!q) return users;
+  return users.filter(u => JSON.stringify(u).toLowerCase().includes(q));
+}
+
+function globalUserCards(users) {
+  if (!users.length) return '<p class="muted">No cross-server matches yet.</p>';
+  return `<div class="profile-grid">${users.map(u => `
+    <article class="profile-card" onclick="openGlobalMember('${u.user_id}')">
+      <div class="profile-head">
+        <div><h3>${esc(u.username || u.user_id)}</h3><span class="muted">${esc(u.user_id)}</span></div>
+        <strong class="gold">${num(u.guild_count)} servers</strong>
+      </div>
+      ${personalityBadge(u.personality_type)}
+      <div>
+        <span class="pill">${num(u.message_count)} messages</span>
+        <span class="pill">${num(u.memory_count)} memories</span>
+        <span class="pill">${num(u.joke_count)} jokes</span>
+        <span class="pill">${num(u.achievement_count)} achievements</span>
+      </div>
+    </article>`).join('')}</div>`;
+}
+
+function globalUserTable(users) {
+  if (!users.length) return '<p class="muted">No global users found.</p>';
+  return `<table><thead><tr><th>User</th><th>Global Type</th><th>Servers</th><th>Signals</th></tr></thead><tbody>${users.map(u => `
+    <tr class="clickable" onclick="openGlobalMember('${u.user_id}')">
+      <td><b>${esc(u.username || u.user_id)}</b><br><span class="muted">${esc(u.user_id)}</span></td>
+      <td><b>${esc((u.personality_type && u.personality_type.label) || 'Unclassified')}</b><br>${esc((u.personality_type && (u.personality_type.traits || []).join(', ')) || '')}</td>
+      <td>${num(u.guild_count)}<br><span class="muted">${esc((u.guild_ids || []).join(', '))}</span></td>
+      <td><span class="pill">${num(u.message_count)} messages</span><span class="pill">${num(u.memory_count)} memories</span><span class="pill">${num(u.joke_count)} jokes</span><span class="pill">${num(u.achievement_count)} achievements</span><span class="pill">${num(u.work_runs)} jobs</span></td>
+    </tr>`).join('')}</tbody></table>`;
 }
 
 function renderGuild() {
@@ -891,6 +1058,23 @@ function discoveryList(list) { return `<div class="list">${(list||[]).map(x => i
 function voyageList(list) { return `<div class="list">${(list||[]).map(x => item(`${x.destination} — ${x.status}`, `${x.risk} • ${x.result || ''}`)).join('') || '<p class="muted">No voyages yet.</p>'}</div>`; }
 function capturedList(list) { return `<div class="list">${(list||[]).map(x => item(`${x.enemy_name} — ${x.status}`, `by ${x.captured_by_name || 'Unknown'} • ${x.reward || 0} doubloons • ${x.xp_reward || 0} XP`)).join('') || '<p class="muted">No captured ships held.</p>'}</div>`; }
 
+async function openGlobalMember(userId) {
+  const data = await api(`/api/global/member/${userId}`);
+  const globalProfile = data.global_profile || {};
+  const globalBase = globalProfile.base || {};
+  $('memberTitle').textContent = `${(globalBase.usernames || [])[0] || userId} — Global Profile`;
+  $('memberBody').innerHTML = `
+    <div class="grid">
+      <div class="card span-12"><h3>Cross-Server Personality Type</h3>${personalityBadge(globalProfile.personality_type)}<p class="muted">Matched by Discord user_id across ${num(globalBase.guild_count || 0)} server(s). Built from ${num(globalBase.message_count || 0)} stored messages across all servers.</p><pre>${esc(JSON.stringify(globalProfile || {}, null, 2))}</pre></div>
+      <div class="card span-12"><h3>Server-Specific Profiles</h3>${simpleRows(data.local_profiles || [], ['guild_id','message_count','memory_count','achievement_count'])}</div>
+      <div class="card span-6"><h3>Global Memories</h3><div class="list">${(data.memories || []).map(m => item(m.memory, `server ${m.guild_id} • confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Global Achievements</h3><div class="list">${(data.achievements || []).map(a => item(a.achievement, `server ${a.guild_id} • ${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Global Running Jokes</h3><div class="list">${(data.running_jokes || []).map(j => item(j.joke, `server ${j.guild_id} • ${j.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+      <div class="card span-6"><h3>Recent Messages Across Servers</h3><div class="list">${(data.recent_messages || []).map(m => item(m.content, `server ${m.guild_id} • ${m.username || ''} • ${m.timestamp || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
+    </div>`;
+  memberDialog.showModal();
+}
+
 async function openMember(guildId, userId) {
   const data = await api(`/api/member/${guildId}/${userId}`);
   const profile = data.profile || {};
@@ -914,9 +1098,9 @@ async function openMember(guildId, userId) {
   memberDialog.showModal();
 }
 
-$('guildSelect').addEventListener('change', e => loadGuild(e.target.value));
-$('refreshBtn').addEventListener('click', () => selectedGuild ? loadGuild(selectedGuild) : loadOverview());
-$('memberSearch').addEventListener('input', () => guild && renderGuild());
+$('guildSelect').addEventListener('change', e => loadSelected(e.target.value));
+$('refreshBtn').addEventListener('click', () => selectedGuild ? loadSelected(selectedGuild) : loadOverview());
+$('memberSearch').addEventListener('input', () => currentView === 'global' ? renderGlobal() : (guild && renderGuild()));
 loadOverview().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); });
 </script>
 </body>
@@ -980,6 +1164,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/overview":
                 self.send_json(overview_payload())
+                return
+            if path == "/api/global":
+                self.send_json(global_payload())
+                return
+            if path.startswith("/api/global/member/"):
+                user_id = safe_int(path.split("/")[-1])
+                self.send_json(global_member_payload(user_id))
                 return
             if path.startswith("/api/guild/"):
                 guild_id = safe_int(path.split("/")[-1])
