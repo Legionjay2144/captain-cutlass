@@ -302,11 +302,57 @@ def guild_ids(conn):
         "economy",
         "ship_history",
         "world_discoveries",
+        "history_imports",
     ):
         if table_exists(conn, table):
             for row in conn.execute(f"SELECT DISTINCT guild_id FROM {table}"):
                 ids.add(row[0])
     return sorted(ids)
+
+
+def import_rows(conn, guild_id=None, limit=LIST_LIMIT):
+    if not table_exists(conn, "history_imports"):
+        return []
+    if guild_id is None:
+        return rows(
+            conn,
+            """
+            SELECT guild_id, channel_id, status, last_message_id, imported_count, scanned_count, started_at, updated_at, stopped_at
+            FROM history_imports
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    return rows(
+        conn,
+        """
+        SELECT guild_id, channel_id, status, last_message_id, imported_count, scanned_count, started_at, updated_at, stopped_at
+        FROM history_imports
+        WHERE guild_id=?
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (guild_id, limit),
+    )
+
+
+def import_summary(conn, guild_id=None):
+    imports = import_rows(conn, guild_id=guild_id, limit=10000)
+    by_status = {}
+    for item in imports:
+        status = item.get("status") or "unknown"
+        by_status[status] = by_status.get(status, 0) + 1
+    return {
+        "channels": len(imports),
+        "imported": sum(safe_int(item.get("imported_count")) for item in imports),
+        "scanned": sum(safe_int(item.get("scanned_count")) for item in imports),
+        "by_status": by_status,
+        "running": by_status.get("running", 0) + by_status.get("stopping", 0),
+        "complete": by_status.get("complete", 0),
+        "paused": by_status.get("paused", 0),
+        "failed": by_status.get("failed", 0),
+    }
 
 
 def dashboard_counts(conn, guild_id):
@@ -329,6 +375,8 @@ def dashboard_counts(conn, guild_id):
         "crew_work_runs": count("crew_work_runs"),
         "messages": count("messages"),
         "captured_ships": count("captured_ships"),
+        "history_import_channels": import_summary(conn, guild_id).get("channels", 0),
+        "history_imported": import_summary(conn, guild_id).get("imported", 0),
     }
 
 
@@ -519,6 +567,8 @@ def global_counts(conn):
         "relationship_events": count("relationship_events"),
         "achievements": count("achievements"),
         "crew_work_runs": count("crew_work_runs"),
+        "history_import_channels": import_summary(conn).get("channels", 0),
+        "history_imported": import_summary(conn).get("imported", 0),
     }
 
 
@@ -579,6 +629,8 @@ def global_payload():
             "counts": global_counts(conn),
             "users": users,
             "multi_server_users": [user for user in users if user.get("guild_count", 0) > 1],
+            "history_imports": import_rows(conn, limit=200),
+            "history_import_summary": import_summary(conn),
         }
 
 
@@ -702,6 +754,8 @@ def guild_payload(guild_id):
                     """,
                     (guild_id,),
                 ) if table_exists(conn, "captured_ships") else [],
+                "history_imports": import_rows(conn, guild_id=guild_id),
+                "history_import_summary": import_summary(conn, guild_id),
                 "crew_work": rows(
                     conn,
                     """
@@ -912,10 +966,11 @@ function renderGlobal() {
   $('content').innerHTML = `
     ${card('Global Overview', `
       <div class="stats">
-        ${stat('Global Users', counts.global_users || 0)}${stat('Servers', counts.servers || 0)}${stat('Messages', counts.messages || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Memories', counts.memories || 0)}${stat('Jokes', counts.running_jokes || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Global Users', counts.global_users || 0)}${stat('Servers', counts.servers || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Memories', counts.memories || 0)}${stat('Jokes', counts.running_jokes || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
       <p class="muted">Global profiles are matched by Discord user_id. Server-specific relationships, permissions, economy, and gameplay stay separate.</p>
     `, 'span-12')}
+    ${card('History Import Status', importStatusPanel(globalData.history_import_summary, globalData.history_imports, true), 'span-12')}
     ${card('Multi-Server Users', globalUserCards(globalData.multi_server_users || []), 'span-12')}
     ${card('Global Crew Profiles', globalUserTable(users), 'span-12')}
   `;
@@ -975,9 +1030,10 @@ function renderGuild() {
     `, 'span-4')}
     ${card('Server Overview', `
       <div class="stats">
-        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
+    ${card('History Import Status', importStatusPanel(guild.history_import_summary, guild.history_imports, false), 'span-12')}
     ${card('Crew Personality Profiles', personalityCards(members), 'span-12')}
     ${card('Crew Table', memberTable(members), 'span-12')}
     ${card('Top Doubloons', simpleRows(guild.top_doubloons, ['username','doubloons']), 'span-6')}
@@ -1047,6 +1103,31 @@ function memberTable(members) {
       <td>${num(m.doubloons)}</td>
       <td><span class="pill">${num(m.message_count)} local messages</span><span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
+}
+
+function statusPill(status) {
+  const s = String(status || 'unknown').toLowerCase();
+  const cls = s === 'failed' ? 'red' : (s === 'running' || s === 'stopping' ? 'green' : (s === 'complete' ? 'gold' : ''));
+  return `<span class="pill ${cls}">${esc(s)}</span>`;
+}
+
+function importStatusPanel(summary, imports, includeServer=false) {
+  summary = summary || {};
+  imports = imports || [];
+  const statusParts = Object.entries(summary.by_status || {}).map(([k,v]) => `<span class="pill">${esc(k)}: ${num(v)}</span>`).join('');
+  return `
+    <div class="stats">
+      ${stat('Channels', summary.channels || 0)}${stat('Imported', summary.imported || 0)}${stat('Scanned', summary.scanned || 0)}${stat('Running', summary.running || 0)}${stat('Paused', summary.paused || 0)}${stat('Complete', summary.complete || 0)}${stat('Failed', summary.failed || 0)}
+    </div>
+    <p>${statusParts || '<span class="muted">No imports recorded yet.</span>'}</p>
+    ${importTable(imports, includeServer)}
+  `;
+}
+
+function importTable(imports, includeServer=false) {
+  if (!imports || !imports.length) return '<p class="muted">No import progress recorded yet.</p>';
+  const cols = includeServer ? ['guild_id','channel_id','status','imported_count','scanned_count','updated_at'] : ['channel_id','status','imported_count','scanned_count','updated_at'];
+  return `<table><thead><tr>${cols.map(c => `<th>${esc(c.replaceAll('_',' '))}</th>`).join('')}</tr></thead><tbody>${imports.slice(0, 30).map(row => `<tr>${cols.map(c => `<td>${c === 'status' ? statusPill(row[c]) : esc(row[c] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 
 function simpleRows(list, keys) {
