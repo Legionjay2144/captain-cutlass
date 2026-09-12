@@ -1093,6 +1093,17 @@ INDEX_HTML = r"""
     .brand { position:relative; min-height:240px; display:flex; align-items:flex-end; gap:18px; max-width:900px; }
     .brand-mark { width:120px; height:120px; border-radius:50%; object-fit:cover; border:2px solid var(--cyan); background:#000; box-shadow:0 0 0 4px rgba(0,0,0,.55), 0 0 34px rgba(16,231,239,.72); }
     .brand-copy { padding:18px 20px; border:1px solid var(--line); background:linear-gradient(90deg, rgba(0,0,0,.72), rgba(4,16,20,.42)); box-shadow:inset 0 0 0 1px rgba(215,162,58,.14), 0 10px 34px rgba(0,0,0,.42); clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px)); }
+    .hero-kicker { display:flex; align-items:center; gap:10px; color:var(--gold); font:800 13px/1 'Courier New', monospace; letter-spacing:.22em; text-transform:uppercase; margin-bottom:8px; text-shadow:0 0 12px rgba(215,162,58,.45); }
+    .hero-kicker::before, .hero-kicker::after { content:''; width:42px; height:2px; background:linear-gradient(90deg, transparent, var(--cyan)); box-shadow:0 0 10px rgba(16,231,239,.75); }
+    .hero-kicker::after { background:linear-gradient(90deg, var(--cyan), transparent); }
+    .hero-title { margin:0; display:grid; gap:0; line-height:.86; text-transform:uppercase; }
+    .hero-title .captain { color:#f6f2e8; font-size:clamp(34px,4.8vw,64px); letter-spacing:.08em; font-weight:900; text-shadow:0 3px 0 #000, 0 0 20px rgba(255,255,255,.28); }
+    .hero-title .cutlass { color:var(--cyan); font-size:clamp(48px,7.6vw,104px); letter-spacing:.025em; font-weight:1000; font-style:italic; transform:skewX(-9deg); text-shadow:0 4px 0 #001417, 0 0 18px rgba(16,231,239,.95), 0 0 42px rgba(16,231,239,.45); }
+    .hero-motto { margin-top:12px; display:inline-flex; align-items:center; gap:10px; color:#f6f2e8; font:800 15px/1.2 'Courier New', monospace; letter-spacing:.12em; text-transform:uppercase; text-shadow:0 0 14px rgba(16,231,239,.3); }
+    .hero-motto::before, .hero-motto::after { content:''; width:32px; height:3px; background:var(--cyan); box-shadow:0 0 12px rgba(16,231,239,.8); }
+    .hero-desc { max-width:760px; margin:12px 0 0; color:#c8e8ed; font-size:16px; line-height:1.45; letter-spacing:.035em; text-shadow:0 1px 0 #000; }
+    .hero-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+    .hero-chip { border:1px solid rgba(16,231,239,.36); background:rgba(0,0,0,.32); color:#9ff8ff; padding:6px 10px; border-radius:4px; font:800 12px/1 'Courier New', monospace; letter-spacing:.08em; text-transform:uppercase; box-shadow:inset 0 0 12px rgba(16,231,239,.06); }
     h1 { margin:0; font-size: clamp(34px, 5vw, 66px); letter-spacing:.045em; color:#f6f2e8; text-transform:uppercase; text-shadow:0 3px 0 #000, 0 0 22px rgba(16,231,239,.55); }
     h1::before, h1::after { content:''; }
     h2 { margin:0 0 14px; font-size:21px; color:#f6f2e8; text-shadow:0 1px 0 #000, 0 0 12px rgba(16,231,239,.3); text-transform:uppercase; letter-spacing:.03em; }
@@ -1140,7 +1151,7 @@ INDEX_HTML = r"""
     .modal-body { padding:18px; max-height:75vh; overflow:auto; }
     pre { white-space:pre-wrap; background:rgba(0,0,0,.32); border:1px solid rgba(16,231,239,.18); padding:12px; border-radius:8px; color:#dffcff; }
     ::selection { background:rgba(16,231,239,.35); }
-    @media (max-width: 900px) { header { min-height:230px; } .brand { min-height:170px; align-items:flex-end; } .brand-mark { width:86px; height:86px; } .span-8,.span-6,.span-4,.span-3 { grid-column:span 12; } }
+    @media (max-width: 900px) { header { min-height:230px; } .brand { min-height:170px; align-items:flex-end; } .brand-mark { width:86px; height:86px; } .hero-title .cutlass { font-size:clamp(42px,14vw,72px); } .hero-motto { font-size:12px; } .hero-desc { font-size:14px; } .span-8,.span-6,.span-4,.span-3 { grid-column:span 12; } }
   </style>
 </head>
 <body>
@@ -1148,8 +1159,18 @@ INDEX_HTML = r"""
   <div class="brand">
     <img class="brand-mark" src="/assets/cutlass.png" alt="Captain Cutlass crest">
     <div class="brand-copy">
-      <h1>Captain Cutlass</h1>
-      <div class="sub">Quarterdeck dashboard for crew profiles, Living Ship stats, world history, jobs, and achievements.</div>
+      <div class="hero-kicker">Quarterdeck Control</div>
+      <div class="hero-title" aria-label="Captain Cutlass">
+        <span class="captain">Captain</span>
+        <span class="cutlass">Cutlass</span>
+      </div>
+      <div class="hero-motto">Pirate. Protector. Programmed to Plunder.</div>
+      <p class="hero-desc">Command center for crew profiles, Living Ship telemetry, world history, jobs, achievements, and every scrap of trouble the fleet has logged.</p>
+      <div class="hero-chips">
+        <span class="hero-chip">System Online</span>
+        <span class="hero-chip">Fleet Protected</span>
+        <span class="hero-chip">Chaos Ready</span>
+      </div>
     </div>
   </div>
 </header>
@@ -1520,6 +1541,11 @@ LOGIN_HTML = r"""
     main > * { position:relative; }
     .login-mark { width:132px; height:132px; display:block; margin:0 auto 14px; border-radius:50%; object-fit:cover; border:2px solid var(--cyan); background:#000; box-shadow:0 0 0 4px rgba(0,0,0,.55), 0 0 34px rgba(16,231,239,.72); }
     h1 { margin:0 0 8px; font-size:34px; letter-spacing:.06em; text-transform:uppercase; color:#f6f2e8; text-align:center; text-shadow:0 2px 0 #000, 0 0 18px rgba(16,231,239,.55); }
+    .login-title { display:grid; justify-items:center; line-height:.9; margin:0 0 10px; text-transform:uppercase; }
+    .login-title .captain { color:#f6f2e8; font-size:30px; font-weight:900; letter-spacing:.14em; text-shadow:0 2px 0 #000, 0 0 14px rgba(255,255,255,.22); }
+    .login-title .cutlass { color:var(--cyan); font-size:54px; font-weight:1000; font-style:italic; letter-spacing:.04em; transform:skewX(-9deg); text-shadow:0 3px 0 #001417, 0 0 18px rgba(16,231,239,.95), 0 0 38px rgba(16,231,239,.42); }
+    .login-motto { display:flex; align-items:center; justify-content:center; gap:8px; margin:2px 0 14px; color:#f6f2e8; font:800 11px/1.2 'Courier New', monospace; letter-spacing:.1em; text-transform:uppercase; text-shadow:0 0 12px rgba(16,231,239,.35); }
+    .login-motto::before, .login-motto::after { content:''; width:28px; height:2px; background:var(--cyan); box-shadow:0 0 10px rgba(16,231,239,.8); }
     p { margin:0 0 22px; color:var(--muted); line-height:1.5; text-align:center; }
     label { display:grid; gap:7px; margin:14px 0; color:var(--cyan); text-transform:uppercase; font-size:12px; letter-spacing:.08em; }
     input, button { width:100%; border:1px solid var(--line); border-radius:6px; padding:12px 13px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 0 16px rgba(16,231,239,.08); }
@@ -1533,8 +1559,12 @@ LOGIN_HTML = r"""
 <body>
   <main>
     <img class="login-mark" src="/assets/cutlass.png" alt="Captain Cutlass crest">
-    <h1>Captain Cutlass</h1>
-    <p>Show yer papers to enter the quarterdeck and inspect crew profiles, Living Ship stats, world history, jobs, and achievements.</p>
+    <div class="login-title" aria-label="Captain Cutlass">
+      <span class="captain">Captain</span>
+      <span class="cutlass">Cutlass</span>
+    </div>
+    <div class="login-motto">Pirate. Protector. Programmed to Plunder.</div>
+    <p>Show yer papers to enter the quarterdeck command center for crew intel, ship telemetry, history, jobs, and achievements.</p>
     {error}
     <form method="post" action="/login">
       <label>Username <input name="username" autocomplete="username" required autofocus></label>
