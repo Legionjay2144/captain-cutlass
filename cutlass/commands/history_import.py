@@ -4,6 +4,7 @@ import re
 import discord
 
 from features import milestone_for_familiarity, relationship_for_familiarity
+from cutlass.message_assessment import assess_message, tags_json
 
 _ACTIVE_IMPORTS = {}
 _STOP_REQUESTS = set()
@@ -187,6 +188,7 @@ async def _import_channel_history(
     *,
     limit,
     save_message,
+    save_message_assessment,
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
@@ -319,6 +321,16 @@ async def _import_channel_history(
                     imported=True,
                 )
                 if inserted_id:
+                    assessment = assess_message(content)
+                    assessment["tags"] = tags_json(assessment.get("tags"))
+                    await save_message_assessment(
+                        inserted_id,
+                        target_channel.guild.id,
+                        target_channel.id,
+                        historic_message.author.id,
+                        historic_message.author.display_name,
+                        assessment,
+                    )
                     imported += 1
                     batch_imported += 1
                     imported_by_user[historic_message.author.id] = (
@@ -379,6 +391,7 @@ async def _import_server_history(
     *,
     limit,
     save_message,
+    save_message_assessment,
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
@@ -417,6 +430,7 @@ async def _import_server_history(
                     target_channel,
                     limit=limit,
                     save_message=save_message,
+                    save_message_assessment=save_message_assessment,
                     ensure_user_profile=ensure_user_profile,
                     ensure_relationship=ensure_relationship,
                     touch_member_seen=touch_member_seen,
@@ -449,6 +463,7 @@ async def handle_history_import_command(
     *,
     is_admin,
     save_message,
+    save_message_assessment,
     ensure_user_profile,
     ensure_relationship,
     touch_member_seen,
@@ -509,6 +524,7 @@ async def handle_history_import_command(
                 message.guild,
                 limit=limit,
                 save_message=save_message,
+                save_message_assessment=save_message_assessment,
                 ensure_user_profile=ensure_user_profile,
                 ensure_relationship=ensure_relationship,
                 touch_member_seen=touch_member_seen,
@@ -552,6 +568,7 @@ async def handle_history_import_command(
             target_channel,
             limit=limit,
             save_message=save_message,
+            save_message_assessment=save_message_assessment,
             ensure_user_profile=ensure_user_profile,
             ensure_relationship=ensure_relationship,
             touch_member_seen=touch_member_seen,

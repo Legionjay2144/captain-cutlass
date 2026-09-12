@@ -415,6 +415,24 @@ async def initialize_database():
             await db.execute("ALTER TABLE messages ADD COLUMN imported_at DATETIME")
 
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS message_assessments (
+                message_id INTEGER PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                source TEXT DEFAULT 'import',
+                sentiment TEXT DEFAULT 'neutral',
+                assessment TEXT DEFAULT '',
+                positive_score INTEGER DEFAULT 0,
+                negative_score INTEGER DEFAULT 0,
+                tags TEXT DEFAULT '',
+                excerpt TEXT DEFAULT '',
+                assessed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS user_profiles (
                 guild_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -790,6 +808,15 @@ async def initialize_database():
         """)
 
         await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_message_assessments_user
+            ON message_assessments (
+                guild_id,
+                user_id,
+                sentiment
+            )
+        """)
+
+        await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_memories_user
             ON user_memories (
                 guild_id,
@@ -920,6 +947,64 @@ async def save_message(
         await db.commit()
 
         return cursor.lastrowid if cursor.rowcount else None
+
+
+async def save_message_assessment(
+    message_id,
+    guild_id,
+    channel_id,
+    user_id,
+    username,
+    assessment
+):
+    if not message_id or not assessment:
+        return
+
+    db = await get_db()
+
+    async with _write_lock:
+        await db.execute("""
+            INSERT INTO message_assessments (
+                message_id,
+                guild_id,
+                channel_id,
+                user_id,
+                username,
+                source,
+                sentiment,
+                assessment,
+                positive_score,
+                negative_score,
+                tags,
+                excerpt,
+                assessed_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'import', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(message_id)
+            DO UPDATE SET
+                username = excluded.username,
+                sentiment = excluded.sentiment,
+                assessment = excluded.assessment,
+                positive_score = excluded.positive_score,
+                negative_score = excluded.negative_score,
+                tags = excluded.tags,
+                excerpt = excluded.excerpt,
+                assessed_at = CURRENT_TIMESTAMP
+        """, (
+            message_id,
+            guild_id,
+            channel_id,
+            user_id,
+            username,
+            assessment.get("sentiment", "neutral"),
+            assessment.get("assessment", ""),
+            int(assessment.get("positive_score") or 0),
+            int(assessment.get("negative_score") or 0),
+            assessment.get("tags", ""),
+            assessment.get("excerpt", ""),
+        ))
+
+        await db.commit()
 
 
 async def get_import_progress(guild_id, channel_id):

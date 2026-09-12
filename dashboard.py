@@ -423,6 +423,7 @@ def collect_member_signal_text(conn, guild_id, user_id, base=None):
         ("running_jokes", "joke", "ORDER BY id DESC LIMIT 5"),
         ("relationship_events", "event", "ORDER BY importance DESC, id DESC LIMIT 6"),
         ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY id DESC LIMIT 8"),
+        ("message_assessments", "assessment || ' ' || sentiment || ' ' || COALESCE(tags, '')", "ORDER BY assessed_at DESC LIMIT 30"),
         ("messages", "content", "ORDER BY id ASC"),
     )
 
@@ -515,6 +516,7 @@ def global_member_signal_text(conn, user_id):
         ("user_memories", "memory", "ORDER BY guild_id ASC, confidence DESC, id ASC"),
         ("running_jokes", "joke", "ORDER BY guild_id ASC, id ASC"),
         ("relationship_events", "event", "ORDER BY guild_id ASC, importance DESC, id ASC"),
+        ("message_assessments", "assessment || ' ' || sentiment || ' ' || COALESCE(tags, '')", "ORDER BY guild_id ASC, assessed_at ASC"),
         ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY guild_id ASC, id ASC"),
         ("messages", "content", "AND content IS NOT NULL AND content != '' ORDER BY id ASC"),
     )
@@ -687,6 +689,7 @@ def dashboard_counts(conn, guild_id):
         "memories": count("user_memories"),
         "running_jokes": count("running_jokes"),
         "relationship_events": count("relationship_events"),
+        "message_assessments": count("message_assessments"),
         "achievements": count("achievements"),
         "ship_history": count("ship_history"),
         "voyages": count("ship_voyages"),
@@ -725,6 +728,11 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
             COALESCE(cw.payout_total, 0) AS work_payout,
             COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
             COALESCE(msg.message_count, 0) AS message_count,
+            COALESCE(ass.assessed_messages, 0) AS assessed_messages,
+            COALESCE(ass.positive_messages, 0) AS positive_messages,
+            COALESCE(ass.mixed_messages, 0) AS mixed_messages,
+            COALESCE(ass.concern_messages, 0) AS concern_messages,
+            COALESCE(ass.neutral_messages, 0) AS neutral_messages,
             COALESCE(gseen.guild_count, 0) AS global_guild_count
         FROM relationships r
         FULL OUTER JOIN user_profiles p
@@ -769,6 +777,17 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
         ) msg ON msg.guild_id = COALESCE(r.guild_id, p.guild_id)
             AND msg.user_id = COALESCE(r.user_id, p.user_id)
         LEFT JOIN (
+            SELECT guild_id, user_id,
+                   COUNT(*) AS assessed_messages,
+                   SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END) AS positive_messages,
+                   SUM(CASE WHEN sentiment='mixed' THEN 1 ELSE 0 END) AS mixed_messages,
+                   SUM(CASE WHEN sentiment='concern' THEN 1 ELSE 0 END) AS concern_messages,
+                   SUM(CASE WHEN sentiment='neutral' THEN 1 ELSE 0 END) AS neutral_messages
+            FROM message_assessments
+            GROUP BY guild_id, user_id
+        ) ass ON ass.guild_id = COALESCE(r.guild_id, p.guild_id)
+            AND ass.user_id = COALESCE(r.user_id, p.user_id)
+        LEFT JOIN (
             SELECT user_id, COUNT(DISTINCT guild_id) AS guild_count
             FROM messages
             GROUP BY user_id
@@ -805,6 +824,11 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                 COALESCE(cw.payout_total, 0) AS work_payout,
                 COALESCE(cw.repair_hull_total, 0) AS repair_hull_total,
                 COALESCE(msg.message_count, 0) AS message_count,
+                COALESCE(ass.assessed_messages, 0) AS assessed_messages,
+                COALESCE(ass.positive_messages, 0) AS positive_messages,
+                COALESCE(ass.mixed_messages, 0) AS mixed_messages,
+                COALESCE(ass.concern_messages, 0) AS concern_messages,
+                COALESCE(ass.neutral_messages, 0) AS neutral_messages,
                 COALESCE(gseen.guild_count, 0) AS global_guild_count
             FROM relationships r
             LEFT JOIN user_profiles p ON p.guild_id = r.guild_id AND p.user_id = r.user_id
@@ -833,6 +857,15 @@ def member_rows(conn, guild_id, limit=LIST_LIMIT):
                 SELECT guild_id, user_id, COUNT(*) AS message_count
                 FROM messages GROUP BY guild_id, user_id
             ) msg ON msg.guild_id = r.guild_id AND msg.user_id = r.user_id
+            LEFT JOIN (
+                SELECT guild_id, user_id,
+                       COUNT(*) AS assessed_messages,
+                       SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END) AS positive_messages,
+                       SUM(CASE WHEN sentiment='mixed' THEN 1 ELSE 0 END) AS mixed_messages,
+                       SUM(CASE WHEN sentiment='concern' THEN 1 ELSE 0 END) AS concern_messages,
+                       SUM(CASE WHEN sentiment='neutral' THEN 1 ELSE 0 END) AS neutral_messages
+                FROM message_assessments GROUP BY guild_id, user_id
+            ) ass ON ass.guild_id = r.guild_id AND ass.user_id = r.user_id
             LEFT JOIN (
                 SELECT user_id, COUNT(DISTINCT guild_id) AS guild_count
                 FROM messages GROUP BY user_id
@@ -885,6 +918,7 @@ def global_counts(conn):
         "memories": count("user_memories"),
         "running_jokes": count("running_jokes"),
         "relationship_events": count("relationship_events"),
+        "message_assessments": count("message_assessments"),
         "achievements": count("achievements"),
         "crew_work_runs": count("crew_work_runs"),
         "history_import_channels": import_summary(conn).get("channels", 0),
@@ -1246,7 +1280,19 @@ def member_payload(guild_id, user_id, include_global=True):
             "achievement_count": scalar(conn, "SELECT COUNT(*) FROM achievements WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "achievements") else 0,
             "work_runs": scalar(conn, "SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "crew_work_stats") else 0,
             "message_count": scalar(conn, "SELECT COUNT(*) FROM messages WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "messages") else 0,
+            "assessed_messages": scalar(conn, "SELECT COUNT(*) FROM message_assessments WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "message_assessments") else 0,
+            "positive_messages": scalar(conn, "SELECT COUNT(*) FROM message_assessments WHERE guild_id=? AND user_id=? AND sentiment='positive'", (guild_id, user_id)) if table_exists(conn, "message_assessments") else 0,
+            "mixed_messages": scalar(conn, "SELECT COUNT(*) FROM message_assessments WHERE guild_id=? AND user_id=? AND sentiment='mixed'", (guild_id, user_id)) if table_exists(conn, "message_assessments") else 0,
+            "concern_messages": scalar(conn, "SELECT COUNT(*) FROM message_assessments WHERE guild_id=? AND user_id=? AND sentiment='concern'", (guild_id, user_id)) if table_exists(conn, "message_assessments") else 0,
+            "neutral_messages": scalar(conn, "SELECT COUNT(*) FROM message_assessments WHERE guild_id=? AND user_id=? AND sentiment='neutral'", (guild_id, user_id)) if table_exists(conn, "message_assessments") else 0,
         })
+        assessment_counts = {
+            "assessed_messages": base.get("assessed_messages", 0),
+            "positive_messages": base.get("positive_messages", 0),
+            "mixed_messages": base.get("mixed_messages", 0),
+            "concern_messages": base.get("concern_messages", 0),
+            "neutral_messages": base.get("neutral_messages", 0),
+        }
         personality_type = infer_personality_type(
             collect_member_signal_text(conn, guild_id, user_id, base),
             base,
@@ -1258,6 +1304,7 @@ def member_payload(guild_id, user_id, include_global=True):
             "user_id": user_id,
             "personality_type": personality_type,
             "global_profile": global_profile,
+            "assessment_counts": assessment_counts,
             "profile": profile,
             "relationship": relationship,
             "economy": economy,
@@ -1265,6 +1312,7 @@ def member_payload(guild_id, user_id, include_global=True):
             "memories": rows(conn, "SELECT memory, confidence, created_at, updated_at FROM user_memories WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 50", (guild_id, user_id)) if table_exists(conn, "user_memories") else [],
             "running_jokes": rows(conn, "SELECT joke, created_at FROM running_jokes WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 30", (guild_id, user_id)) if table_exists(conn, "running_jokes") else [],
             "relationship_events": rows(conn, "SELECT event, importance, created_at FROM relationship_events WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 40", (guild_id, user_id)) if table_exists(conn, "relationship_events") else [],
+            "message_assessments": rows(conn, "SELECT sentiment, assessment, positive_score, negative_score, tags, excerpt, assessed_at FROM message_assessments WHERE guild_id=? AND user_id=? ORDER BY assessed_at DESC, message_id DESC LIMIT 60", (guild_id, user_id)) if table_exists(conn, "message_assessments") else [],
             "achievements": rows(conn, "SELECT achievement, description, awarded_at FROM achievements WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 50", (guild_id, user_id)) if table_exists(conn, "achievements") else [],
             "crew_work": rows(conn, "SELECT * FROM crew_work_stats WHERE guild_id=? AND user_id=? ORDER BY total_runs DESC, job_label LIMIT 50", (guild_id, user_id)) if table_exists(conn, "crew_work_stats") else [],
             "recent_work_runs": rows(conn, "SELECT job_label, result_type, payout, ship_bonus_type, ship_bonus_value, repair_hull, details, created_at FROM crew_work_runs WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 30", (guild_id, user_id)) if table_exists(conn, "crew_work_runs") else [],
@@ -1472,7 +1520,7 @@ function renderGlobal() {
   $('content').innerHTML = `
     ${card('Global Overview', `
       <div class="stats">
-        ${stat('Global Users', counts.global_users || 0)}${stat('Servers', counts.servers || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Memories', counts.memories || 0)}${stat('Jokes', counts.running_jokes || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Global Users', counts.global_users || 0)}${stat('Servers', counts.servers || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Assessed', counts.message_assessments || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Memories', counts.memories || 0)}${stat('Jokes', counts.running_jokes || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
       <p class="muted">Global profiles are matched by Discord user_id. Server-specific relationships, permissions, economy, and gameplay stay separate.</p>
     `, 'span-12')}
@@ -1537,7 +1585,7 @@ function renderGuild() {
     `, 'span-4')}
     ${card(`Server Overview — ${esc(guild.guild_name || selectedGuild)}`, `
       <div class="stats">
-        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Welcome', settings.welcome_enabled ? 'On' : 'Off')}${stat('Returners', settings.returning_enabled ? 'On' : 'Off')}${stat('Events', settings.event_mode ? 'On' : 'Off')}${stat('Ship World', shipSettings.enabled ? 'On' : 'Off')}${stat('Conversation', settings.conversation_channel_id ? 'Locked' : 'Any')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Welcome', settings.welcome_enabled ? 'On' : 'Off')}${stat('Returners', settings.returning_enabled ? 'On' : 'Off')}${stat('Events', settings.event_mode ? 'On' : 'Off')}${stat('Ship World', shipSettings.enabled ? 'On' : 'Off')}${stat('Conversation', settings.conversation_channel_id ? 'Locked' : 'Any')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Assessed', counts.message_assessments || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
     ${card('Bot Controls', botControls(settings, shipSettings), 'span-12')}
@@ -1643,6 +1691,12 @@ function profileBlurb(m) {
   return parts.join(' ');
 }
 
+function assessmentPills(m) {
+  const assessed = num(m.assessed_messages || 0);
+  if (!assessed) return '';
+  return `<span class="pill">${assessed} assessed</span><span class="pill green">${num(m.positive_messages || 0)} positive</span><span class="pill gold">${num(m.mixed_messages || 0)} mixed</span><span class="pill red">${num(m.concern_messages || 0)} concern</span>`;
+}
+
 function personalityBadge(type) {
   if (!type) return '';
   const traits = (type.traits || []).slice(0, 4).map(t => `<span class="pill">${esc(t)}</span>`).join('');
@@ -1664,6 +1718,7 @@ function personalityCards(members) {
         ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
         ${m.pronouns ? `<span class="pill">Pronouns: ${esc(m.pronouns)}</span>` : ''}
         <span class="pill">${num(m.message_count)} local messages</span>
+        ${assessmentPills(m)}
         <span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span>
         <span class="pill">${num(m.memory_count)} memories</span>
         <span class="pill">${num(m.joke_count)} jokes</span>
@@ -1682,7 +1737,7 @@ function memberTable(members) {
       <td>${esc(m.relationship_type || '')}<br><span class="pill">Familiarity ${num(m.familiarity)}</span>${m.nickname ? `<span class="pill">${esc(m.nickname)}</span>` : ''}</td>
       <td><b>${esc((m.personality_type && m.personality_type.label) || 'Unclassified')}</b><br>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
       <td>${num(m.doubloons)}</td>
-      <td><span class="pill">${num(m.message_count)} local messages</span><span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
+      <td><span class="pill">${num(m.message_count)} local messages</span>${assessmentPills(m)}<span class="pill">Seen in ${num(m.global_guild_count || 1)} server(s)</span><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -1744,10 +1799,12 @@ async function openMember(guildId, userId) {
   const econ = data.economy || {};
   const globalProfile = data.global_profile || {};
   const globalBase = globalProfile.base || {};
+  const assess = data.assessment_counts || {};
   $('memberTitle').textContent = `${rel.username || profile.username || userId}`;
   $('memberBody').innerHTML = `
     <div class="grid">
       <div class="card span-12"><h3>Local Server Personality Type</h3>${personalityBadge(data.personality_type)}<p class="muted">Built from this server’s stored message history plus local memories, jokes, relationship events, achievements, and crew activity.</p><pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
+      <div class="card span-12"><h3>Imported Message Assessment</h3><div class="stats">${stat('Assessed', assess.assessed_messages || 0)}${stat('Positive', assess.positive_messages || 0)}${stat('Mixed', assess.mixed_messages || 0)}${stat('Concern', assess.concern_messages || 0)}${stat('Neutral', assess.neutral_messages || 0)}</div><p class="muted">These are observed chat-pattern signals from imported messages, not moral verdicts or diagnoses.</p>${simpleRows(data.message_assessments, ['sentiment','assessment','positive_score','negative_score','tags','excerpt'])}</div>
       <div class="card span-12"><h3>Cross-Server Identity Match</h3>${personalityBadge(globalProfile.personality_type)}<p class="muted">Same Discord user_id seen in ${num(globalBase.guild_count || 0)} server(s). Built from ${num(globalBase.message_count || 0)} stored messages across all servers. Server-specific gameplay, economy, permissions, and relationships remain separate.</p><pre>${esc(JSON.stringify(globalProfile || {}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>

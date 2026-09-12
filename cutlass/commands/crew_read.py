@@ -117,6 +117,7 @@ async def build_global_crew_profile(user_id):
         ("SELECT memory FROM user_memories WHERE user_id=? ORDER BY guild_id ASC, confidence DESC, id ASC", (user_id,)),
         ("SELECT joke FROM running_jokes WHERE user_id=? ORDER BY guild_id ASC, id ASC", (user_id,)),
         ("SELECT event FROM relationship_events WHERE user_id=? ORDER BY guild_id ASC, importance DESC, id ASC", (user_id,)),
+        ("SELECT assessment || ' ' || sentiment || ' ' || COALESCE(tags, '') FROM message_assessments WHERE user_id=? ORDER BY guild_id ASC, assessed_at ASC", (user_id,)),
         ("SELECT achievement || CASE WHEN description IS NOT NULL AND description != '' THEN ': ' || description ELSE '' END FROM achievements WHERE user_id=? ORDER BY guild_id ASC, id ASC", (user_id,)),
         ("SELECT content FROM messages WHERE user_id=? AND content IS NOT NULL AND content != '' ORDER BY id ASC", (user_id,)),
     )
@@ -146,6 +147,7 @@ async def build_global_crew_profile(user_id):
         "memory_count": await count("SELECT COUNT(*) FROM user_memories WHERE user_id=?"),
         "joke_count": await count("SELECT COUNT(*) FROM running_jokes WHERE user_id=?"),
         "achievement_count": await count("SELECT COUNT(*) FROM achievements WHERE user_id=?"),
+        "assessed_messages": await count("SELECT COUNT(*) FROM message_assessments WHERE user_id=?"),
         "work_runs": await count("SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE user_id=?"),
         "ship_contributed": await count("SELECT COALESCE(SUM(amount), 0) FROM ship_contributions WHERE user_id=?"),
     }
@@ -224,6 +226,30 @@ async def build_member_crew_read(guild_id, user_id):
         "SELECT event FROM relationship_events WHERE guild_id=? AND user_id=? ORDER BY importance DESC, id DESC LIMIT 8",
         (guild_id, user_id),
     )
+    assessments = []
+    try:
+        cursor = await db.execute(
+            """
+            SELECT sentiment, assessment, tags, excerpt
+            FROM message_assessments
+            WHERE guild_id=? AND user_id=?
+            ORDER BY assessed_at DESC, message_id DESC
+            LIMIT 40
+            """,
+            (guild_id, user_id),
+        )
+        assessment_rows = await cursor.fetchall()
+        assessments = [
+            {
+                "sentiment": row[0] or "neutral",
+                "assessment": row[1] or "",
+                "tags": row[2] or "",
+                "excerpt": row[3] or "",
+            }
+            for row in assessment_rows
+        ]
+    except Exception:
+        assessments = []
     achievements = await _fetch_text_rows(
         db,
         "SELECT achievement || CASE WHEN description IS NOT NULL AND description != '' THEN ': ' || description ELSE '' END FROM achievements WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10",
@@ -260,6 +286,11 @@ async def build_member_crew_read(guild_id, user_id):
     base["achievement_count"] = len(achievements)
     base["message_count"] = total_message_count
     base["messages_analyzed"] = len(messages)
+    base["assessed_messages"] = len(assessments)
+    base["positive_messages"] = len([item for item in assessments if item["sentiment"] == "positive"])
+    base["mixed_messages"] = len([item for item in assessments if item["sentiment"] == "mixed"])
+    base["concern_messages"] = len([item for item in assessments if item["sentiment"] == "concern"])
+    base["neutral_messages"] = len([item for item in assessments if item["sentiment"] == "neutral"])
 
     signal_parts = []
     for key in ("relationship_type", "nickname", "opinion", "summary"):
@@ -268,6 +299,10 @@ async def build_member_crew_read(guild_id, user_id):
     signal_parts.extend(memories)
     signal_parts.extend(jokes)
     signal_parts.extend(events)
+    signal_parts.extend(
+        item["assessment"] + " " + item["sentiment"] + " " + item["tags"]
+        for item in assessments
+    )
     signal_parts.extend(achievements)
     signal_parts.extend(messages)
     signal_text = "\n".join(signal_parts)
@@ -285,6 +320,7 @@ async def build_member_crew_read(guild_id, user_id):
         "memories": memories,
         "jokes": jokes,
         "events": events,
+        "assessments": assessments,
         "achievements": achievements,
         "messages": messages,
     }
@@ -299,12 +335,15 @@ def format_member_crew_read(target, data):
         + list(data["memories"]),
         3,
     )
+    assessed_positive = [
+        item.get("excerpt") or item.get("assessment")
+        for item in data.get("assessments", [])
+        if item.get("sentiment") == "positive"
+    ][:3]
     concern = [
-        text for text in summarize_evidence(
-            list(data["events"]) + list(data["memories"]),
-            8,
-        )
-        if any(term in text.lower() for term in ("drama", "mutiny", "threat", "kicked", "crushed", "trouble", "argument"))
+        item.get("excerpt") or item.get("assessment")
+        for item in data.get("assessments", [])
+        if item.get("sentiment") == "concern"
     ][:3]
 
     lines = [
@@ -313,7 +352,7 @@ def format_member_crew_read(target, data):
         "Personality type: **" + personality["label"] + "** (" + str(personality["confidence"]) + "% confidence)",
         "Traits: " + ", ".join(personality["traits"]),
         "Relationship: " + str(base.get("relationship_type") or "Unknown") + " | Familiarity: " + str(base.get("familiarity") or 0) + "/100",
-        "Signals: " + str(personality["signal_count"]) + " local signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed in this server (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
+        "Signals: " + str(personality["signal_count"]) + " local signals, " + str(base.get("messages_analyzed", 0)) + " lifetime messages analyzed in this server (" + str(base.get("message_count", 0)) + " stored), " + str(base.get("assessed_messages", 0)) + " imported messages assessed, " + str(base.get("memory_count", 0)) + " memories, " + str(base.get("joke_count", 0)) + " jokes, " + str(base.get("achievement_count", 0)) + " achievements, " + str(base.get("work_runs", 0)) + " work runs.",
     ]
 
     global_profile = data.get("global_profile") or {}
@@ -335,8 +374,9 @@ def format_member_crew_read(target, data):
 
     lines.append("")
     lines.append("Positive / useful signals:")
-    if positive:
-        lines.extend("• " + item for item in positive)
+    positive_items = assessed_positive + positive
+    if positive_items:
+        lines.extend("• " + item for item in positive_items[:3])
     else:
         lines.append("• Not enough positive signal recorded yet.")
 

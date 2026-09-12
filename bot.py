@@ -196,6 +196,7 @@ from memory import (
     run_maintenance,
 
     save_message,
+    save_message_assessment,
     get_recent_messages,
 
     ensure_user_profile,
@@ -4664,6 +4665,7 @@ async def handle_commands(
         command,
         is_admin=is_admin,
         save_message=save_message,
+        save_message_assessment=save_message_assessment,
         ensure_user_profile=ensure_user_profile,
         ensure_relationship=ensure_relationship,
         touch_member_seen=touch_member_seen,
