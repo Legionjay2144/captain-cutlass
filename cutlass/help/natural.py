@@ -1252,6 +1252,51 @@ def command_suggestions(raw_command, limit=3):
     if not normalized:
         return []
 
+    results = []
+
+    def add_result(entry):
+        item = {
+            "command": entry["command"],
+            "description": entry["description"],
+        }
+
+        if item not in results:
+            results.append(item)
+
+    explicit_intent = resolve_explicit_help_intent(normalized)
+
+    if explicit_intent:
+        add_result(explicit_intent)
+
+    term_matches = []
+
+    for key, entry in COMMAND_HELP.items():
+        best_term = None
+
+        for term in entry["terms"]:
+            normalized_term = normalize_help_text(term)
+
+            if not normalized_term:
+                continue
+
+            if normalized_term in normalized or normalized in normalized_term:
+                if best_term is None or len(normalized_term) > len(best_term):
+                    best_term = normalized_term
+
+        if best_term is not None:
+            term_matches.append((len(best_term), key, entry))
+
+    term_matches.sort(
+        key=lambda row: row[0],
+        reverse=True,
+    )
+
+    for _, _, entry in term_matches:
+        add_result(entry)
+
+        if len(results) >= int(limit):
+            return results[:limit]
+
     candidates = []
 
     for entry in COMMAND_HELP.values():
@@ -1291,8 +1336,6 @@ def command_suggestions(raw_command, limit=3):
         n=max(1, int(limit)),
         cutoff=0.35,
     )
-
-    results = []
 
     for name in close:
 

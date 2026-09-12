@@ -31,6 +31,7 @@ DASHBOARD_COOKIE_NAME = "cutlass_dashboard_session"
 DASHBOARD_ASSETS = {
     "/assets/cutlass.png": Path(__file__).with_name("cutlass.png"),
     "/assets/banner.png": Path(__file__).with_name("banner.png"),
+    "/favicon.ico": Path(__file__).with_name("cutlass.png"),
 }
 PASSWORD_HASH_ITERATIONS = 260000
 
