@@ -505,8 +505,10 @@ async def handle_help_command(
             name="History Import",
             value=(
                 "`!cutlass history import [#channel] [limit|all]`\n"
+                "`!cutlass history import server [limit|all]`\n"
                 "`!cutlass history import status`\n"
-                "`!cutlass history import stop [#channel]`"
+                "`!cutlass history import stop [#channel]`\n"
+                "`!cutlass history import stop server`"
             ),
             inline=False
         )
@@ -679,8 +681,10 @@ async def handle_help_command(
                 "`!c returners status/on/off/days <days>`\n"
                 "`!c log status/channel/on/off`\n"
                 "`!c history import [#channel] [limit|all]`\n"
+                "`!c history import server [limit|all]`\n"
                 "`!c history import status`\n"
                 "`!c history import stop [#channel]`\n"
+                "`!c history import stop server`\n"
                 "`!c crew read @user`\n"
                 "`!c chronicle now`\n"
                 "`!c ship channel/on/off/status`\n"

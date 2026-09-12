@@ -5,6 +5,37 @@ import discord
 
 _ACTIVE_IMPORTS = {}
 _STOP_REQUESTS = set()
+_ACTIVE_SERVER_IMPORTS = {}
+_SERVER_STOP_REQUESTS = set()
+
+
+def _server_key(guild_id):
+    return int(guild_id)
+
+
+def _is_server_import_command(command):
+    return (
+        command.startswith("!cutlass history import server")
+        or command.startswith("!cutlass history import all server")
+        or command.startswith("!cutlass history import whole server")
+    )
+
+
+def _is_server_stop_command(command):
+    return (
+        command.startswith("!cutlass history import stop server")
+        or command.startswith("!cutlass history import server stop")
+    )
+
+
+def _readable_history_channels(guild):
+    bot_member = guild.me
+    channels = []
+    for channel in getattr(guild, "text_channels", []):
+        perms = channel.permissions_for(bot_member) if bot_member else None
+        if perms and perms.view_channel and perms.read_message_history:
+            channels.append(channel)
+    return sorted(channels, key=lambda channel: (getattr(channel, "position", 0), channel.id))
 
 
 def _key(guild_id, channel_id):
@@ -196,6 +227,74 @@ async def _import_channel_history(
         _STOP_REQUESTS.discard(key)
 
 
+async def _import_server_history(
+    status_channel,
+    guild,
+    *,
+    limit,
+    save_message,
+    ensure_user_profile,
+    ensure_relationship,
+    touch_member_seen,
+    get_import_progress,
+    upsert_import_progress,
+):
+    server_key = _server_key(guild.id)
+    channels = _readable_history_channels(guild)
+    imported_channels = 0
+    skipped_channels = 0
+
+    try:
+        if not channels:
+            await status_channel.send("I cannot find any readable text channels with message-history permission in this server.")
+            return
+
+        for target_channel in channels:
+            if server_key in _SERVER_STOP_REQUESTS:
+                await status_channel.send(
+                    "Server history import stopped. Processed "
+                    + str(imported_channels)
+                    + " channel(s); skipped "
+                    + str(skipped_channels)
+                    + "."
+                )
+                return
+
+            key = _key(guild.id, target_channel.id)
+            if key in _ACTIVE_IMPORTS:
+                skipped_channels += 1
+                continue
+
+            task = asyncio.create_task(
+                _import_channel_history(
+                    status_channel,
+                    target_channel,
+                    limit=limit,
+                    save_message=save_message,
+                    ensure_user_profile=ensure_user_profile,
+                    ensure_relationship=ensure_relationship,
+                    touch_member_seen=touch_member_seen,
+                    get_import_progress=get_import_progress,
+                    upsert_import_progress=upsert_import_progress,
+                )
+            )
+            _ACTIVE_IMPORTS[key] = task
+            imported_channels += 1
+            await task
+            await asyncio.sleep(0.5)
+
+        await status_channel.send(
+            "Server history import finished. Processed "
+            + str(imported_channels)
+            + " readable channel(s); skipped "
+            + str(skipped_channels)
+            + " already-active channel(s)."
+        )
+    finally:
+        _ACTIVE_SERVER_IMPORTS.pop(server_key, None)
+        _SERVER_STOP_REQUESTS.discard(server_key)
+
+
 async def handle_history_import_command(
     message,
     content,
@@ -217,19 +316,65 @@ async def handle_history_import_command(
         await message.reply("Only the Admiralty may import channel history.", mention_author=False)
         return True
 
-    target_channel = _resolve_channel(message)
-    key = _key(message.guild.id, target_channel.id)
-
     if command.startswith("!cutlass history import status"):
+        server_key = _server_key(message.guild.id)
+        server_note = ""
+        if server_key in _ACTIVE_SERVER_IMPORTS:
+            server_note = "\nServer-wide import: running"
+
         rows = await list_import_progress(message.guild.id)
-        if not rows:
+        if not rows and not server_note:
             await message.reply("No history imports recorded for this server.", mention_author=False)
             return True
-        lines = ["**HISTORY IMPORT STATUS**"]
-        for row in rows[:10]:
+        lines = ["**HISTORY IMPORT STATUS**" + server_note]
+        for row in rows[:15]:
             lines.append(_format_progress_row(row, message.guild.get_channel))
         await message.reply("\n".join(lines)[:1900], mention_author=False)
         return True
+
+    if _is_server_stop_command(command):
+        server_key = _server_key(message.guild.id)
+        if server_key in _ACTIVE_SERVER_IMPORTS:
+            _SERVER_STOP_REQUESTS.add(server_key)
+            for active_guild_id, active_channel_id in list(_ACTIVE_IMPORTS):
+                if active_guild_id == message.guild.id:
+                    _STOP_REQUESTS.add((active_guild_id, active_channel_id))
+                    await upsert_import_progress(message.guild.id, active_channel_id, status="stopping")
+            await message.reply("Stopping server-wide history import after current channel/batch.", mention_author=False)
+        else:
+            await message.reply("No server-wide history import is currently running.", mention_author=False)
+        return True
+
+    if _is_server_import_command(command):
+        server_key = _server_key(message.guild.id)
+        if server_key in _ACTIVE_SERVER_IMPORTS:
+            await message.reply("A server-wide history import is already running. Use `!c history import status`.", mention_author=False)
+            return True
+        limit = _parse_limit(content)
+        channels = _readable_history_channels(message.guild)
+        task = asyncio.create_task(
+            _import_server_history(
+                message.channel,
+                message.guild,
+                limit=limit,
+                save_message=save_message,
+                ensure_user_profile=ensure_user_profile,
+                ensure_relationship=ensure_relationship,
+                touch_member_seen=touch_member_seen,
+                get_import_progress=get_import_progress,
+                upsert_import_progress=upsert_import_progress,
+            )
+        )
+        _ACTIVE_SERVER_IMPORTS[server_key] = task
+        limit_text = "all available history per channel" if limit is None else str(limit) + " messages max per channel"
+        await message.reply(
+            "Started server-wide history import across " + str(len(channels)) + " readable channel(s) (" + limit_text + "). Use `!c history import status` or `!c history import stop server`.",
+            mention_author=False,
+        )
+        return True
+
+    target_channel = _resolve_channel(message)
+    key = _key(message.guild.id, target_channel.id)
 
     if command.startswith("!cutlass history import stop"):
         if key in _ACTIVE_IMPORTS:
