@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from cutlass.message_assessment import aggregate_assessments, assessment_summary, user_assessment_label
 from cutlass.message_assessment_ai import ASSESSMENT_BATCH_SIZE, assess_messages_sync, assessment_status
+from cutlass import police_chief as pc
 
 DB_PATH = os.getenv("DATABASE_PATH", "/app/data/captain.db")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
@@ -1429,6 +1430,110 @@ def dashboard_access_options_payload():
         return {"guilds": [guild_summary(conn, guild_id) for guild_id in guild_ids(conn)]}
 
 
+def police_chief_payload(guild_id):
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        return pc.roster_payload(conn, guild_id)
+
+
+def dashboard_pc_save_player(payload, actor):
+    guild_id = safe_int(payload.get("guild_id"))
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        player, created = pc.upsert_player(
+            conn,
+            guild_id,
+            payload.get("player_name"),
+            power=payload.get("power") if payload.get("power") not in (None, "") else None,
+            alliance_rank=payload.get("alliance_rank"),
+            alliance_name=payload.get("alliance_name"),
+            status=payload.get("status"),
+            notes=payload.get("notes"),
+            tags=payload.get("tags"),
+            game_player_id=payload.get("game_player_id"),
+            source="dashboard",
+            actor_name=(actor or {}).get("username", "dashboard"),
+        )
+        return {"player": player, "created": created, "roster": pc.roster_payload(conn, guild_id)}
+
+
+def dashboard_pc_delete_player(payload):
+    guild_id = safe_int(payload.get("guild_id"))
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        pc.delete_player(conn, guild_id, payload.get("player_name"))
+        return {"ok": True, "roster": pc.roster_payload(conn, guild_id)}
+
+
+def dashboard_pc_link(payload, actor):
+    guild_id = safe_int(payload.get("guild_id"))
+    discord_user_id = safe_int(payload.get("discord_user_id"))
+    if not discord_user_id:
+        raise ValueError("Discord user ID is required.")
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        detail = pc.link_discord(
+            conn,
+            guild_id,
+            payload.get("player_name"),
+            discord_user_id,
+            payload.get("discord_username", ""),
+            actor_name=(actor or {}).get("username", "dashboard"),
+        )
+        return {"player": detail, "roster": pc.roster_payload(conn, guild_id)}
+
+
+def dashboard_pc_unlink(payload, actor):
+    guild_id = safe_int(payload.get("guild_id"))
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        detail = pc.unlink_discord(
+            conn,
+            guild_id,
+            payload.get("player_name"),
+            actor_name=(actor or {}).get("username", "dashboard"),
+        )
+        return {"player": detail, "roster": pc.roster_payload(conn, guild_id)}
+
+
+def dashboard_pc_upload(payload, actor):
+    guild_id = safe_int(payload.get("guild_id"))
+    import_type = str(payload.get("import_type") or "").strip().lower()
+    filename = str(payload.get("filename") or "upload.png")
+    content_type = str(payload.get("content_type") or "application/octet-stream")
+    data_url = str(payload.get("data") or "")
+    if "," in data_url:
+        data_url = data_url.split(",", 1)[1]
+    try:
+        file_bytes = base64.b64decode(data_url, validate=True)
+    except Exception:
+        raise ValueError("Upload data was not valid base64.")
+    if len(file_bytes) > 8 * 1024 * 1024:
+        raise ValueError("Screenshot upload limit is 8 MB.")
+    stored_path = pc.save_upload_file(file_bytes, filename)
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        import_id = pc.add_import(
+            conn,
+            guild_id,
+            import_type,
+            filename=filename,
+            stored_path=stored_path,
+            content_type=content_type,
+            uploader_name=(actor or {}).get("username", "dashboard"),
+            notes="Dashboard upload saved for OCR/review.",
+        )
+        return {"ok": True, "import_id": import_id, "roster": pc.roster_payload(conn, guild_id)}
+
+
+def dashboard_pc_import_status(payload):
+    guild_id = safe_int(payload.get("guild_id"))
+    with db_write_connect() as conn:
+        pc.ensure_schema(conn)
+        pc.update_import_status(conn, payload.get("import_id"), payload.get("status"), payload.get("notes"))
+        return {"ok": True, "roster": pc.roster_payload(conn, guild_id)}
+
+
 def guild_payload(guild_id):
     with db_connect() as conn:
         payload = guild_summary(conn, guild_id)
@@ -1748,6 +1853,8 @@ let sessionUser = null;
 let assessmentStatus = null;
 let selectedGuild = null;
 let currentView = 'server';
+let policeData = null;
+let policeGuildId = null;
 let searchRenderTimer = null;
 const DASHBOARD_RENDER_LIMIT = 100;
 const dashboardToken = new URLSearchParams(window.location.search).get('token') || localStorage.getItem('cutlassDashboardToken') || '';
@@ -1807,7 +1914,7 @@ async function loadOverview() {
   if (sessionUser && sessionUser.role === 'admin') $('adminBtn').style.display = '';
   overview = await api('/api/overview');
   const select = $('guildSelect');
-  const globalOption = overview.can_view_global ? `<option value="__global__">Global Info — all servers and matched users</option>` : '';
+  const globalOption = overview.can_view_global ? `<option value="__global__">Global Info — all servers and matched users</option><option value="__police__">Police Chief Roster</option>` : '';
   const serverOptions = overview.guilds.map(g => {
     const counts = g.counts || {};
     const shipName = (g.ship && g.ship.name) || 'No ship';
@@ -1826,6 +1933,7 @@ async function loadOverview() {
 
 async function loadSelected(value) {
   if (value === '__global__') return await loadGlobal();
+  if (value === '__police__') return await loadPoliceChief();
   return await loadGuild(value);
 }
 
@@ -1954,6 +2062,135 @@ function globalUserTable(users) {
       <td>${num(u.guild_count)}<br><span class="muted">${esc((u.guild_ids || []).join(', '))}</span></td>
       <td><span class="pill">${num(u.message_count)} messages</span><span class="pill">${num(u.memory_count)} memories</span><span class="pill">${num(u.joke_count)} jokes</span><span class="pill">${num(u.achievement_count)} achievements</span><span class="pill">${num(u.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
+}
+
+async function loadPoliceChief(guildId=null) {
+  currentView = 'police';
+  selectedGuild = '__police__';
+  policeGuildId = guildId || policeGuildId || ((overview.guilds[0] || {}).guild_id || 0);
+  $('status').textContent = 'Loading Police Chief roster…';
+  policeData = await api(`/api/police-chief?guild_id=${encodeURIComponent(policeGuildId)}`);
+  renderPoliceChief();
+  $('status').textContent = 'Loaded Police Chief roster';
+}
+
+function policeGuildSelector() {
+  const guilds = (overview && overview.guilds) || [];
+  return `<select id="pcGuild" onchange="loadPoliceChief(this.value)">${guilds.map(g => `<option value="${esc(g.guild_id)}" ${String(g.guild_id) === String(policeGuildId) ? 'selected' : ''}>${esc(g.guild_name || g.guild_id)}</option>`).join('')}</select>`;
+}
+
+function renderPoliceChief() {
+  const counts = (policeData && policeData.counts) || {};
+  $('content').innerHTML = `
+    ${card('Police Chief Roster', `
+      <div class="toolbar"><label>Server ${policeGuildSelector()}</label><button type="button" onclick="loadPoliceChief(policeGuildId)">Refresh</button></div>
+      <div class="stats">${stat('Players', counts.players || 0)}${stat('Linked Discord', counts.linked || 0)}${stat('Unlinked', counts.unlinked || 0)}${stat('Total Power', num(counts.total_power || 0))}${stat('Pending Imports', counts.pending_imports || 0)}</div>
+    `, 'span-12')}
+    ${card('Add / Edit Player', policePlayerForm(), 'span-12')}
+    ${card('Screenshot Imports', policeImportPanel(), 'span-12')}
+    ${card('Roster Spreadsheet', policeRosterTable(policeData.players || []), 'span-12')}
+    ${card('Import Review Queue', policeImportTable(policeData.imports || []), 'span-12')}
+  `;
+}
+
+function policePlayerForm() {
+  return `
+    <div class="toolbar">
+      <input id="pcName" placeholder="player name">
+      <input id="pcPower" placeholder="power">
+      <input id="pcRank" placeholder="alliance rank">
+      <input id="pcAlliance" placeholder="alliance">
+      <select id="pcStatus"><option>unknown</option><option>ally</option><option>neutral</option><option>enemy</option><option>watchlist</option><option>inactive</option></select>
+      <input id="pcTags" placeholder="tags">
+      <button type="button" onclick="savePolicePlayer()">Save Player</button>
+    </div>
+    <textarea id="pcNotes" placeholder="notes" style="width:100%;min-height:70px;margin-top:8px"></textarea>
+    <p class="muted">Players do not need to be Discord members. Link a Discord profile separately when available.</p>
+  `;
+}
+
+function policeImportPanel() {
+  return `
+    <div class="toolbar">
+      <select id="pcImportType"><option value="alliance">Alliance roster screenshot</option><option value="profile">Individual profile / power screenshot</option></select>
+      <input id="pcImportFile" type="file" accept="image/*" multiple>
+      <button type="button" onclick="uploadPoliceScreenshots()">Upload for Review</button>
+    </div>
+    <p class="muted">Uploads are stored as evidence and marked pending. OCR/review can be added on top of this queue.</p>
+  `;
+}
+
+function policeRosterTable(players) {
+  if (!players.length) return '<p class="muted">No Police Chief players tracked yet.</p>';
+  return `<table><thead><tr><th>Player</th><th>Power</th><th>Rank</th><th>Status</th><th>Discord</th><th>Notes</th><th>Actions</th></tr></thead><tbody>${players.map(p => `
+    <tr>
+      <td><b>${esc(p.player_name)}</b><br><span class="muted">${esc(p.tags || '')}</span></td>
+      <td>${p.power == null ? '' : num(p.power)}</td>
+      <td>${esc(p.alliance_rank || '')}<br><span class="muted">${esc(p.alliance_name || '')}</span></td>
+      <td>${esc(p.status || 'unknown')}</td>
+      <td>${p.discord_user_id ? `${esc(p.discord_username || p.discord_user_id)}<br><button type="button" onclick="unlinkPoliceDiscord('${esc(p.player_name)}')">Unlink</button>` : `<input id="link_${p.id}" placeholder="Discord user ID" size="15"><input id="linkn_${p.id}" placeholder="display name" size="12"><button type="button" onclick="linkPoliceDiscord('${esc(p.player_name)}','link_${p.id}','linkn_${p.id}')">Link</button>`}</td>
+      <td>${esc((p.notes || '').slice(0, 160))}</td>
+      <td><button type="button" onclick='fillPoliceForm(${JSON.stringify(p).replaceAll("'", "&#39;")})'>Edit</button><button type="button" onclick="deletePolicePlayer('${esc(p.player_name)}')">Delete</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function policeImportTable(imports) {
+  if (!imports.length) return '<p class="muted">No screenshot imports yet.</p>';
+  return `<table><thead><tr><th>Type</th><th>Status</th><th>File</th><th>Uploaded By</th><th>Notes</th><th>Action</th></tr></thead><tbody>${imports.map(row => `
+    <tr><td>${esc(row.import_type)}</td><td>${esc(row.status)}</td><td>${esc(row.original_filename)}</td><td>${esc(row.uploaded_by_name || '')}</td><td>${esc(row.notes || '')}</td><td><button type="button" onclick="setPoliceImportStatus(${row.id}, 'confirmed')">Confirm</button><button type="button" onclick="setPoliceImportStatus(${row.id}, 'rejected')">Reject</button></td></tr>`).join('')}</tbody></table>`;
+}
+
+function fillPoliceForm(p) {
+  $('pcName').value = p.player_name || '';
+  $('pcPower').value = p.power || '';
+  $('pcRank').value = p.alliance_rank || '';
+  $('pcAlliance').value = p.alliance_name || '';
+  $('pcStatus').value = p.status || 'unknown';
+  $('pcTags').value = p.tags || '';
+  $('pcNotes').value = p.notes || '';
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+async function savePolicePlayer() {
+  const result = await apiJson('/api/police-chief/player', {guild_id: policeGuildId, player_name: $('pcName').value, power: $('pcPower').value, alliance_rank: $('pcRank').value, alliance_name: $('pcAlliance').value, status: $('pcStatus').value, tags: $('pcTags').value, notes: $('pcNotes').value});
+  policeData = result.roster;
+  renderPoliceChief();
+}
+
+async function deletePolicePlayer(name) {
+  if (!confirm(`Delete Police Chief player ${name}?`)) return;
+  const result = await apiJson('/api/police-chief/player/delete', {guild_id: policeGuildId, player_name: name});
+  policeData = result.roster;
+  renderPoliceChief();
+}
+
+async function linkPoliceDiscord(name, idInput, nameInput) {
+  const result = await apiJson('/api/police-chief/link', {guild_id: policeGuildId, player_name: name, discord_user_id: $(idInput).value, discord_username: $(nameInput).value});
+  policeData = result.roster;
+  renderPoliceChief();
+}
+
+async function unlinkPoliceDiscord(name) {
+  const result = await apiJson('/api/police-chief/unlink', {guild_id: policeGuildId, player_name: name});
+  policeData = result.roster;
+  renderPoliceChief();
+}
+
+async function uploadPoliceScreenshots() {
+  const files = Array.from($('pcImportFile').files || []);
+  if (!files.length) return;
+  for (const file of files) {
+    const data = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
+    const result = await apiJson('/api/police-chief/import', {guild_id: policeGuildId, import_type: $('pcImportType').value, filename: file.name, content_type: file.type, data});
+    policeData = result.roster;
+  }
+  renderPoliceChief();
+}
+
+async function setPoliceImportStatus(importId, status) {
+  const result = await apiJson('/api/police-chief/import/status', {guild_id: policeGuildId, import_id: importId, status});
+  policeData = result.roster;
+  renderPoliceChief();
 }
 
 function renderGuild() {
@@ -2634,6 +2871,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
                 self.send_json(assessment_sweep_status_payload())
                 return
+            if path == "/api/police-chief":
+                query = parse_qs(parsed.query)
+                guild_id = safe_int((query.get("guild_id") or [0])[0])
+                if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                    self.send_json({"error": "server access required"}, 403)
+                    return
+                self.send_json(police_chief_payload(guild_id))
+                return
             if path == "/api/overview":
                 self.send_json(overview_payload(self.access_user()))
                 return
@@ -2734,6 +2979,38 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             self.send_json({"ok": True, "user": user})
             return
+
+        if path.startswith("/api/police-chief/"):
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            guild_id = safe_int(payload.get("guild_id"))
+            if not require_dashboard_access(self.access_user(), guild_id=guild_id):
+                self.send_json({"error": "server access required"}, 403)
+                return
+            try:
+                if path == "/api/police-chief/player":
+                    self.send_json(dashboard_pc_save_player(payload, self.access_user()))
+                    return
+                if path == "/api/police-chief/player/delete":
+                    self.send_json(dashboard_pc_delete_player(payload))
+                    return
+                if path == "/api/police-chief/link":
+                    self.send_json(dashboard_pc_link(payload, self.access_user()))
+                    return
+                if path == "/api/police-chief/unlink":
+                    self.send_json(dashboard_pc_unlink(payload, self.access_user()))
+                    return
+                if path == "/api/police-chief/import":
+                    self.send_json(dashboard_pc_upload(payload, self.access_user()))
+                    return
+                if path == "/api/police-chief/import/status":
+                    self.send_json(dashboard_pc_import_status(payload))
+                    return
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
 
         if path == "/api/admin/assessment/sweep":
             if not self.admin_authorized():

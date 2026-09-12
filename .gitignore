@@ -19,3 +19,4 @@ data/captain.db-shm
 *.before-p4-checkpoint9
 data/dashboard_users.json
 data/dashboard_users.json.tmp
+data/police_chief_uploads/

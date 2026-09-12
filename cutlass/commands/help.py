@@ -50,6 +50,9 @@ async def handle_help_command(
 
             "**Pirate World & Combat** — "
             "`!cutlass help world`",
+
+            "**Police Chief Tracker** — "
+            "`!cutlass help pc`",
         ]
 
         if is_admin(message):
@@ -576,6 +579,37 @@ async def handle_help_command(
 
         return True
 
+
+    # =====================================================
+    # Police Chief Tracker
+    # =====================================================
+
+    if command in ("!cutlass help pc", "!cutlass help policechief"):
+
+        embed = discord.Embed(
+            title="🚓 Police Chief Tracker",
+            color=0x3498DB
+        )
+
+        embed.description = (
+            "`!c pc player <name>` — Show a Police Chief player\n"
+            "`!c pc top` — Top tracked power roster\n"
+            "`!c pc power <name> <power>` — Set player power\n"
+            "`!c pc rank <name> <rank>` — Set alliance rank\n"
+            "`!c pc status <name> <ally|neutral|enemy|watchlist|inactive|unknown>` — Set status\n"
+            "`!c pc note <name> | <note>` — Set notes\n"
+            "`!c pc link <name> @user` — Attach a Discord profile\n"
+            "`!c pc unlink <name>` — Remove Discord link\n"
+            "`!c pc import alliance/profile` — Attach screenshots for dashboard review"
+        )
+
+        await message.reply(
+            embed=embed,
+            mention_author=False
+        )
+
+        return True
+
     # =====================================================
     # Full Command List
     # =====================================================
@@ -586,7 +620,7 @@ async def handle_help_command(
             (
                 "**Help & Shortcuts**\n"
                 "`!c help` / `!c commands`\n"
-                "`!c help crew/fun/parrot/ship/world/admin`\n"
+                "`!c help crew/fun/parrot/ship/world/pc/admin`\n"
                 "`!c help all`\n"
                 "Shortcuts: `!c repair`, `!c upgrades`, `!c history`,\n"
                 "`!c treasury`, `!c destinations`"
@@ -695,6 +729,16 @@ async def handle_help_command(
                 "`!c voyage destinations`\n"
                 "`!c voyage status`\n"
                 "`!c voyage start <number>`"
+            ),
+            (
+                "**Police Chief Tracker**\n"
+                "`!c pc player <name>`\n"
+                "`!c pc top`\n"
+                "`!c pc power <name> <power>`\n"
+                "`!c pc rank <name> <rank>`\n"
+                "`!c pc status <name> <status>`\n"
+                "`!c pc link <name> @user`\n"
+                "`!c pc import alliance/profile`"
             ),
             (
                 "**Admiralty**\n"

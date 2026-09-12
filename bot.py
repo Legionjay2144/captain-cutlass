@@ -20,6 +20,7 @@ from cutlass.commands.captain import handle_captain_command
 from cutlass.commands.admin import handle_admin_command
 from cutlass.commands.parrot import handle_parrot_command
 from cutlass.commands.work import handle_work_command
+from cutlass.commands.police_chief import handle_police_chief_command
 from cutlass.commands.ship import handle_ship_command
 from cutlass.commands.world import handle_world_command
 from cutlass.commands.exploration import handle_exploration_command
@@ -4778,6 +4779,14 @@ async def handle_commands(
 
 
     if await handle_work_command(
+        message,
+        content,
+        command,
+    ):
+        return True
+
+
+    if await handle_police_chief_command(
         message,
         content,
         command,
