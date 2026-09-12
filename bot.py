@@ -285,7 +285,7 @@ DISCORD_TOKEN = os.getenv(
 
 OPENAI_MODEL = os.getenv(
     "OPENAI_MODEL",
-    "gpt-4.1-mini"
+    "gpt-5-nano"
 )
 
 

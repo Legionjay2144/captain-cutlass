@@ -16,7 +16,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from cutlass.message_assessment import assess_message, tags_json
 
-ASSESSMENT_MODEL = os.getenv("MESSAGE_ASSESSMENT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
+ASSESSMENT_MODEL = os.getenv("MESSAGE_ASSESSMENT_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5-nano"
 ASSESSMENT_PROVIDER = os.getenv("MESSAGE_ASSESSMENT_PROVIDER", "rules").strip().lower()
 ASSESSMENT_BATCH_SIZE = max(1, min(int(os.getenv("MESSAGE_ASSESSMENT_BATCH_SIZE", "20")), 50))
 ASSESSMENT_TIMEOUT_SECONDS = max(5.0, float(os.getenv("MESSAGE_ASSESSMENT_TIMEOUT_SECONDS", "45")))

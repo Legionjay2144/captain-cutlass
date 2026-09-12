@@ -13,7 +13,7 @@ class AIProviderConfig:
     fallback_provider: str = "none"
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-5-nano"
     local_api_key: Optional[str] = None
     local_base_url: Optional[str] = None
     local_model: Optional[str] = None
@@ -304,7 +304,7 @@ def build_ai_gateway():
         openai_base_url=os.getenv("OPENAI_BASE_URL"),
         openai_model=os.getenv(
             "OPENAI_MODEL",
-            "gpt-4.1-mini",
+            "gpt-5-nano",
         ),
         local_api_key=os.getenv("LOCAL_AI_API_KEY"),
         local_base_url=os.getenv("LOCAL_AI_BASE_URL"),

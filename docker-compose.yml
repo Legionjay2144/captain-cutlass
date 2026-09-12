@@ -27,7 +27,7 @@ services:
       PYTHONUNBUFFERED: "1"
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-none}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
 
     volumes:
       - ./data:/app/data

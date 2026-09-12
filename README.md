@@ -223,7 +223,7 @@ Recommended OpenAI setup:
 ```env
 DISCORD_TOKEN=your_discord_bot_token
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-4.1-mini
+OPENAI_MODEL=gpt-5-nano
 AI_PROVIDER=openai
 AI_FALLBACK_PROVIDER=none
 ```
