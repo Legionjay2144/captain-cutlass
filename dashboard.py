@@ -243,9 +243,20 @@ def guild_summary(conn, guild_id):
 
 def overview_payload():
     with db_connect() as conn:
+        guilds = [guild_summary(conn, guild_id) for guild_id in guild_ids(conn)]
+        guilds.sort(
+            key=lambda item: (
+                item["counts"].get("members", 0),
+                item["counts"].get("profiles", 0),
+                item["counts"].get("memories", 0),
+                item["counts"].get("ship_history", 0),
+                item["counts"].get("discoveries", 0),
+            ),
+            reverse=True,
+        )
         return {
             "database": DB_PATH,
-            "guilds": [guild_summary(conn, guild_id) for guild_id in guild_ids(conn)],
+            "guilds": guilds,
         }
 
 
@@ -469,7 +480,11 @@ async function loadOverview() {
   $('status').textContent = 'Loading…';
   overview = await api('/api/overview');
   const select = $('guildSelect');
-  select.innerHTML = overview.guilds.map(g => `<option value="${g.guild_id}">${g.guild_id} — ${(g.ship && esc(g.ship.name)) || 'No ship'}</option>`).join('');
+  select.innerHTML = overview.guilds.map(g => {
+    const counts = g.counts || {};
+    const shipName = (g.ship && g.ship.name) || 'No ship';
+    return `<option value="${g.guild_id}">${g.guild_id} — ${esc(shipName)} — ${counts.members || 0} crew / ${counts.memories || 0} memories</option>`;
+  }).join('');
   selectedGuild = select.value || (overview.guilds[0] && overview.guilds[0].guild_id);
   if (selectedGuild) await loadGuild(selectedGuild);
   $('status').textContent = 'Ready';
@@ -524,7 +539,7 @@ function filterMembers(members) {
 }
 
 function memberTable(members) {
-  if (!members.length) return '<p class="muted">No members found.</p>';
+  if (!members.length) return '<p class="muted">No members found for this server. Choose a server with crew/profile counts from the Server dropdown above.</p>';
   return `<table><thead><tr><th>Crew</th><th>Relationship</th><th>Profile</th><th>Doubloons</th><th>Signals</th></tr></thead><tbody>${members.map(m => `
     <tr class="clickable" onclick="openMember('${m.guild_id}','${m.user_id}')">
       <td><b>${esc(m.username || m.user_id)}</b><br><span class="muted">${esc(m.user_id)}</span></td>
