@@ -1688,8 +1688,15 @@ INDEX_HTML = r"""
     .personality-type > span { color:var(--muted); font-size:12px; }
     .item { padding:10px 12px; background:rgba(0,0,0,.22); border:1px solid rgba(16,231,239,.16); border-radius:8px; }
     .item small { color:var(--muted); display:block; margin-top:4px; }
-    dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:10px; background:#030708; color:var(--text); padding:0; box-shadow:0 20px 70px rgba(0,0,0,.68), 0 0 34px rgba(16,231,239,.16); }
-    dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter: blur(4px); }
+    dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:10px; background:#030708; color:var(--text); padding:0; box-shadow:0 10px 28px rgba(0,0,0,.55); }
+    dialog::backdrop { background:rgba(0,0,0,.55); }
+    #adminDialog { width:min(760px, calc(100vw - 20px)); }
+    #adminDialog .modal-body { max-height:70vh; }
+    .admin-lite-card { border:1px solid var(--dimline); background:rgba(0,0,0,.2); border-radius:8px; padding:12px; margin-top:10px; }
+    .admin-lite-row { display:grid; grid-template-columns:minmax(130px,1fr) minmax(120px,170px); gap:10px; align-items:center; }
+    .admin-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+    .admin-details { margin-top:8px; padding-top:8px; border-top:1px solid rgba(16,231,239,.12); }
+    .admin-details summary { cursor:pointer; color:var(--cyan); font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
     .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg, #0b191d, #030708); }
     .modal-body { padding:18px; max-height:75vh; overflow:auto; }
     pre { white-space:pre-wrap; background:rgba(0,0,0,.32); border:1px solid rgba(16,231,239,.18); padding:12px; border-radius:8px; color:#dffcff; }
@@ -2283,27 +2290,31 @@ function selectedGuildAccess(prefix) {
 
 function dashboardUsersTable(users) {
   if (!users.length) return '<p class="muted">No dashboard users configured.</p>';
-  return `<table><thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Edit access</th><th>Password</th><th>Action</th></tr></thead><tbody>${users.map(u => {
+  return `<div class="admin-user-list">${users.map(u => {
     const access = u.access || {};
     const prefix = `access_${String(u.username).replace(/[^A-Za-z0-9_-]/g, '_')}`;
-    return `<tr>
-      <td><b>${esc(u.username)}</b><br><span class="muted">Created ${esc(u.created_at || '')}</span></td>
-      <td><select id="${prefix}_role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></td>
-      <td>${esc(accessSummary(u))}</td>
-      <td>
-        <label class="access-toggle"><input id="${prefix}_all" type="checkbox" ${access.all ? 'checked' : ''}> All access</label>
-        <label class="access-toggle"><input id="${prefix}_global" type="checkbox" ${access.global ? 'checked' : ''}> Global info</label>
-        <button type="button" onclick="loadAccessCheckboxesForUser('${esc(u.username)}','${prefix}')">Edit Servers</button>
+    return `<section class="admin-lite-card">
+      <div class="admin-lite-row">
+        <div><b>${esc(u.username)}</b><br><span class="muted">${esc(accessSummary(u))}</span></div>
+        <select id="${prefix}_role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select>
+      </div>
+      <details class="admin-details">
+        <summary>Edit account</summary>
+        <div class="admin-actions">
+          <label class="access-toggle"><input id="${prefix}_all" type="checkbox" ${access.all ? 'checked' : ''}> All access</label>
+          <label class="access-toggle"><input id="${prefix}_global" type="checkbox" ${access.global ? 'checked' : ''}> Global info</label>
+          <button type="button" onclick="loadAccessCheckboxesForUser('${esc(u.username)}','${prefix}')">Edit Servers</button>
+          <button type="button" onclick="saveDashboardAccess('${esc(u.username)}','${prefix}')">Save Access</button>
+        </div>
         <div id="${prefix}_box" class="access-grid" data-loaded="0"><p class="muted">Server list hidden until Edit Servers is clicked.</p></div>
-        <button type="button" onclick="saveDashboardAccess('${esc(u.username)}','${prefix}')">Save Access</button>
-      </td>
-      <td>
-        <input id="${prefix}_password" type="password" placeholder="new password" size="14">
-        <button type="button" onclick="resetDashboardPassword('${esc(u.username)}','${prefix}')">Reset</button>
-      </td>
-      <td><button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete</button></td>
-    </tr>`;
-  }).join('')}</tbody></table>`;
+        <div class="admin-actions">
+          <input id="${prefix}_password" type="password" placeholder="new password" size="14">
+          <button type="button" onclick="resetDashboardPassword('${esc(u.username)}','${prefix}')">Reset Password</button>
+          <button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete User</button>
+        </div>
+      </details>
+    </section>`;
+  }).join('')}</div>`;
 }
 
 async function createDashboardUserFromForm() {
