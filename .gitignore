@@ -17,3 +17,5 @@ data/captain.db-shm
 *.bak.*
 *.broken-*
 *.before-p4-checkpoint9
+data/dashboard_users.json
+data/dashboard_users.json.tmp

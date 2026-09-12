@@ -392,7 +392,7 @@ The project includes a read-only dashboard for inspecting Captain Cutlass data o
 - Doubloons, ship treasury contributions, achievements, and crew-work totals.
 - World discoveries, recent world history, ship history, voyages, captured ships, and job summaries.
 
-The dashboard uses the same Docker image as the bot and reads the SQLite database through the existing `./data:/app/data` volume. The dashboard container mounts that volume read-only.
+The dashboard uses the same Docker image as the bot and reads the SQLite database through the existing `./data:/app/data` volume. The dashboard opens the SQLite database in read-only mode and writes only its dashboard account file.
 
 Start the dashboard:
 
@@ -419,6 +419,7 @@ DASHBOARD_USERNAME=admin
 DASHBOARD_PASSWORD=choose-a-long-random-password
 DASHBOARD_SESSION_SECRET=choose-a-different-long-random-secret
 DASHBOARD_SESSION_SECONDS=86400
+DASHBOARD_USERS_FILE=/app/data/dashboard_users.json
 ```
 
 Then open:
@@ -427,7 +428,9 @@ Then open:
 http://SERVER_IP:8787/
 ```
 
-For multiple dashboard users, use `DASHBOARD_USERS` instead of, or in addition to, the single username/password pair:
+The first configured username/password is seeded as an admin account. Admins can open the dashboard, click **Users**, and create additional user or admin accounts. Account records are stored with hashed passwords in `./data/dashboard_users.json`.
+
+For multiple seed admins, use `DASHBOARD_USERS` instead of, or in addition to, the single username/password pair:
 
 ```env
 DASHBOARD_USERS=admin:first-password,jay:second-password

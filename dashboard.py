@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import time
 from http import cookies
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -18,6 +19,7 @@ DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "").strip()
 DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "").strip()
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "").strip()
 DASHBOARD_USERS = os.getenv("DASHBOARD_USERS", "").strip()
+DASHBOARD_USERS_FILE = os.getenv("DASHBOARD_USERS_FILE", "/app/data/dashboard_users.json").strip()
 DASHBOARD_SESSION_SECRET = (
     os.getenv("DASHBOARD_SESSION_SECRET", "").strip()
     or DASHBOARD_TOKEN
@@ -25,6 +27,7 @@ DASHBOARD_SESSION_SECRET = (
 )
 DASHBOARD_SESSION_SECONDS = int(os.getenv("DASHBOARD_SESSION_SECONDS", "86400"))
 DASHBOARD_COOKIE_NAME = "cutlass_dashboard_session"
+PASSWORD_HASH_ITERATIONS = 260000
 
 TEXT_LIMIT = 500
 LIST_LIMIT = 200
@@ -83,17 +86,154 @@ def dashboard_user_map():
             username = username.strip()
             password = password.strip()
             if username and password:
-                users[username] = password
+                users[username] = {"password": password, "role": "admin"}
     if DASHBOARD_USERNAME and DASHBOARD_PASSWORD:
-        users[DASHBOARD_USERNAME] = DASHBOARD_PASSWORD
+        users[DASHBOARD_USERNAME] = {"password": DASHBOARD_PASSWORD, "role": "admin"}
     return users
 
 
-DASHBOARD_USER_MAP = dashboard_user_map()
+def hash_dashboard_password(password):
+    salt = secrets.token_urlsafe(18)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PASSWORD_HASH_ITERATIONS,
+    ).hex()
+    return f"pbkdf2_sha256${PASSWORD_HASH_ITERATIONS}${salt}${digest}"
+
+
+def verify_dashboard_password(password, stored_hash):
+    try:
+        algorithm, iterations, salt, digest = stored_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            int(iterations),
+        ).hex()
+        return hmac.compare_digest(candidate, digest)
+    except Exception:
+        return False
+
+
+def load_dashboard_users():
+    path = Path(DASHBOARD_USERS_FILE)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {}
+    users = data.get("users", {}) if isinstance(data, dict) else {}
+    clean = {}
+    for username, record in users.items():
+        if not isinstance(record, dict) or not record.get("password_hash"):
+            continue
+        clean[str(username)] = {
+            "password_hash": str(record.get("password_hash")),
+            "role": "admin" if record.get("role") == "admin" else "user",
+            "created_at": record.get("created_at"),
+        }
+    return clean
+
+
+def save_dashboard_users(users):
+    path = Path(DASHBOARD_USERS_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe_users = {
+        username: {
+            "password_hash": record["password_hash"],
+            "role": "admin" if record.get("role") == "admin" else "user",
+            "created_at": record.get("created_at") or int(time.time()),
+        }
+        for username, record in sorted(users.items())
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps({"users": safe_users}, indent=2, sort_keys=True))
+    tmp.replace(path)
+
+
+def ensure_dashboard_users():
+    users = load_dashboard_users()
+    changed = False
+    for username, seed in dashboard_user_map().items():
+        password = seed.get("password")
+        if not username or not password:
+            continue
+        created_at = users.get(username, {}).get("created_at") or int(time.time())
+        users[username] = {
+            "password_hash": hash_dashboard_password(password),
+            "role": seed.get("role", "admin"),
+            "created_at": created_at,
+        }
+        changed = True
+    if changed:
+        save_dashboard_users(users)
+    return users
+
+
+def dashboard_public_users():
+    return [
+        {
+            "username": username,
+            "role": record.get("role", "user"),
+            "created_at": record.get("created_at"),
+        }
+        for username, record in sorted(load_dashboard_users().items())
+    ]
+
+
+def dashboard_user_record(username):
+    return load_dashboard_users().get(username)
+
+
+def verify_dashboard_login(username, password):
+    record = dashboard_user_record(username)
+    if not record:
+        return None
+    if not verify_dashboard_password(password, record.get("password_hash", "")):
+        return None
+    return {"username": username, "role": record.get("role", "user")}
+
+
+def create_dashboard_user(username, password, role="user"):
+    username = re.sub(r"[^A-Za-z0-9_.@-]", "", str(username or "").strip())
+    if len(username) < 2:
+        raise ValueError("Username must be at least 2 characters.")
+    if len(str(password or "")) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    users = load_dashboard_users()
+    if username in users:
+        raise ValueError("That dashboard user already exists.")
+    users[username] = {
+        "password_hash": hash_dashboard_password(password),
+        "role": "admin" if role == "admin" else "user",
+        "created_at": int(time.time()),
+    }
+    save_dashboard_users(users)
+    return {"username": username, "role": users[username]["role"], "created_at": users[username]["created_at"]}
+
+
+def delete_dashboard_user(username):
+    users = load_dashboard_users()
+    record = users.get(username)
+    if not record:
+        raise ValueError("That dashboard user does not exist.")
+    admin_count = sum(1 for item in users.values() if item.get("role") == "admin")
+    if record.get("role") == "admin" and admin_count <= 1:
+        raise ValueError("Cannot remove the last dashboard admin.")
+    del users[username]
+    save_dashboard_users(users)
+
+
+ensure_dashboard_users()
 
 
 def dashboard_login_enabled():
-    return bool(DASHBOARD_USER_MAP)
+    return bool(load_dashboard_users())
 
 
 def make_session_token(username):
@@ -125,7 +265,7 @@ def verify_session_token(token):
     ).hexdigest()
     if not hmac.compare_digest(signature, expected):
         return None
-    if username not in DASHBOARD_USER_MAP:
+    if not dashboard_user_record(username):
         return None
     return username
 
@@ -988,12 +1128,14 @@ INDEX_HTML = r"""
     <label>Server <select id="guildSelect"></select></label>
     <input id="memberSearch" placeholder="Filter crew by name, relationship, summary…" size="42">
     <button id="refreshBtn">Refresh</button>
+    <button id="adminBtn" type="button" style="display:none">Users</button>
     <button type="button" onclick="window.location.href='/logout'">Log out</button>
     <span id="status" class="muted"></span>
   </section>
   <section id="content" class="grid"></section>
 </main>
 <dialog id="memberDialog"><div class="modal-head"><h2 id="memberTitle"></h2><button onclick="memberDialog.close()">Close</button></div><div id="memberBody" class="modal-body"></div></dialog>
+<dialog id="adminDialog"><div class="modal-head"><h2>Dashboard Users</h2><button onclick="adminDialog.close()">Close</button></div><div id="adminBody" class="modal-body"></div></dialog>
 <script>
 const $ = id => document.getElementById(id);
 let overview = null;
@@ -1013,13 +1155,16 @@ function withToken(path) {
   url.searchParams.set('token', dashboardToken);
   return url.pathname + url.search;
 }
-async function api(path) { const res = await fetch(withToken(path)); if (!res.ok) throw new Error(await res.text()); return await res.json(); }
+async function api(path, options={}) { const res = await fetch(withToken(path), options); if (!res.ok) throw new Error(await res.text()); return await res.json(); }
+async function apiJson(path, payload, method='POST') { return await api(path, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload || {}) }); }
 function card(title, body, cls='span-12') { return `<div class="card ${cls}"><h2>${esc(title)}</h2>${body}</div>`; }
 function stat(label, value) { return `<div class="stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`; }
 function item(text, meta='') { return `<div class="item">${esc(text)}${meta ? `<small>${esc(meta)}</small>` : ''}</div>`; }
 
 async function loadOverview() {
   $('status').textContent = 'Loading…';
+  const session = await api('/api/session');
+  if (session.user && session.user.role === 'admin') $('adminBtn').style.display = '';
   overview = await api('/api/overview');
   const select = $('guildSelect');
   select.innerHTML = `<option value="__global__">Global Info — all servers and matched users</option>` + overview.guilds.map(g => {
@@ -1275,8 +1420,47 @@ async function openMember(guildId, userId) {
   memberDialog.showModal();
 }
 
+async function openAdminUsers() {
+  const data = await api('/api/admin/users');
+  $('adminBody').innerHTML = `
+    <div class="card span-12">
+      <h3>Create User</h3>
+      <div class="toolbar">
+        <input id="newDashUser" placeholder="username">
+        <input id="newDashPass" type="password" placeholder="password">
+        <select id="newDashRole"><option value="user">User</option><option value="admin">Admin</option></select>
+        <button type="button" onclick="createDashboardUserFromForm()">Create</button>
+      </div>
+      <p class="muted">Admins can create and remove dashboard accounts. User accounts can view the dashboard only.</p>
+    </div>
+    <div class="card span-12"><h3>Existing Users</h3>${dashboardUsersTable(data.users || [])}</div>
+  `;
+  adminDialog.showModal();
+}
+
+function dashboardUsersTable(users) {
+  if (!users.length) return '<p class="muted">No dashboard users configured.</p>';
+  return `<table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Action</th></tr></thead><tbody>${users.map(u => `
+    <tr><td><b>${esc(u.username)}</b></td><td>${esc(u.role)}</td><td>${esc(u.created_at || '')}</td><td><button type="button" onclick="deleteDashboardUser('${esc(u.username)}')">Delete</button></td></tr>
+  `).join('')}</tbody></table>`;
+}
+
+async function createDashboardUserFromForm() {
+  const username = $('newDashUser').value;
+  const password = $('newDashPass').value;
+  const role = $('newDashRole').value;
+  await apiJson('/api/admin/users', {username, password, role});
+  await openAdminUsers();
+}
+
+async function deleteDashboardUser(username) {
+  await apiJson('/api/admin/users/delete', {username});
+  await openAdminUsers();
+}
+
 $('guildSelect').addEventListener('change', e => loadSelected(e.target.value));
 $('refreshBtn').addEventListener('click', () => selectedGuild ? loadSelected(selectedGuild) : loadOverview());
+$('adminBtn').addEventListener('click', () => openAdminUsers().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); }));
 $('memberSearch').addEventListener('input', () => currentView === 'global' ? renderGlobal() : (guild && renderGuild()));
 loadOverview().catch(err => { $('status').textContent = 'Error: ' + err.message; console.error(err); });
 </script>
@@ -1357,14 +1541,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return None
         return verify_session_token(morsel.value)
 
+    def current_user(self):
+        username = self.session_username()
+        if not username:
+            return None
+        record = dashboard_user_record(username)
+        if not record:
+            return None
+        return {"username": username, "role": record.get("role", "user")}
+
     def authorized(self):
         if DASHBOARD_TOKEN:
             token = self.query_token()
             if token and hmac.compare_digest(token, DASHBOARD_TOKEN):
                 return True
-        if self.session_username():
+        if self.current_user():
             return True
         return not DASHBOARD_TOKEN and not dashboard_login_enabled()
+
+    def admin_authorized(self):
+        user = self.current_user()
+        return bool(user and user.get("role") == "admin")
 
     def send_json(self, payload, status=200):
         body = json.dumps(json_safe_ids(payload), indent=2, default=str).encode("utf-8")
@@ -1427,6 +1624,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/health":
                 self.send_json({"ok": True, "database": DB_PATH, "login_enabled": dashboard_login_enabled()})
                 return
+            if path == "/api/session":
+                self.send_json({"user": self.current_user(), "login_enabled": dashboard_login_enabled()})
+                return
+            if path == "/api/admin/users":
+                if not self.admin_authorized():
+                    self.send_json({"error": "admin required"}, 403)
+                    return
+                self.send_json({"users": dashboard_public_users()})
+                return
             if path == "/api/overview":
                 self.send_json(overview_payload())
                 return
@@ -1451,37 +1657,72 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_json({"error": str(exc)}, 500)
 
+    def read_body(self, limit=10000):
+        try:
+            length = min(int(self.headers.get("Content-Length", "0")), limit)
+        except ValueError:
+            length = 0
+        return self.rfile.read(length).decode("utf-8", errors="replace")
+
+    def read_json_body(self):
+        try:
+            return json.loads(self.read_body())
+        except Exception:
+            return {}
+
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
-        if path != "/login":
-            self.send_json({"error": "not found"}, 404)
-            return
-        if not dashboard_login_enabled():
-            self.send_login("Dashboard user login is not configured.", status=503)
-            return
+        if path == "/login":
+            if not dashboard_login_enabled():
+                self.send_login("Dashboard user login is not configured.", status=503)
+                return
+            fields = parse_qs(self.read_body())
+            username = (fields.get("username") or [""])[0].strip()
+            password = (fields.get("password") or [""])[0]
+            user = verify_dashboard_login(username, password)
 
-        try:
-            length = min(int(self.headers.get("Content-Length", "0")), 10000)
-        except ValueError:
-            length = 0
-        fields = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
-        username = (fields.get("username") or [""])[0].strip()
-        password = (fields.get("password") or [""])[0]
-        expected = DASHBOARD_USER_MAP.get(username)
+            if user:
+                self.redirect("/", {"Set-Cookie": dashboard_cookie_header(username)})
+                return
 
-        if expected and hmac.compare_digest(password, expected):
-            self.redirect("/", {"Set-Cookie": dashboard_cookie_header(username)})
+            self.send_login("Invalid dashboard username or password.", status=401)
             return
 
-        self.send_login("Invalid dashboard username or password.", status=401)
+        if path == "/api/admin/users":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            try:
+                user = create_dashboard_user(payload.get("username"), payload.get("password"), payload.get("role", "user"))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"user": user, "users": dashboard_public_users()}, 201)
+            return
+
+        if path == "/api/admin/users/delete":
+            if not self.admin_authorized():
+                self.send_json({"error": "admin required"}, 403)
+                return
+            payload = self.read_json_body()
+            try:
+                delete_dashboard_user(str(payload.get("username", "")))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "users": dashboard_public_users()})
+            return
+
+        self.send_json({"error": "not found"}, 404)
 
 
 if __name__ == "__main__":
     print(f"Captain Cutlass dashboard listening on {DASHBOARD_HOST}:{DASHBOARD_PORT}")
     print(f"Database: {DB_PATH}")
     if dashboard_login_enabled():
-        print(f"Dashboard user login: enabled for {len(DASHBOARD_USER_MAP)} user(s)")
+        print(f"Dashboard user login: enabled for {len(load_dashboard_users())} user(s)")
     else:
         print("Dashboard user login: disabled")
     if DASHBOARD_TOKEN:
