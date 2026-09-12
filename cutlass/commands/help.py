@@ -59,8 +59,8 @@ async def handle_help_command(
             )
             help_lines.append(
                 "**Dashboard Controls** — browser controls for "
-                "quiet mode, Ship World, welcomes, chronicles, "
-                "and account visibility"
+                "quiet mode, conversation channel, Ship World, "
+                "welcomes, chronicles, and account visibility"
             )
 
         help_lines.extend(
@@ -537,6 +537,9 @@ async def handle_help_command(
             name="Server Controls",
             value=(
                 "`!cutlass quiet on/off`\n"
+                "`!cutlass conversation status`\n"
+                "`!cutlass conversation channel #channel`\n"
+                "`!cutlass conversation off`\n"
                 "`!cutlass mood <mood>`\n"
                 "`!cutlass event on/off`\n"
                 "`!cutlass ai` / `!cutlass ai status`\n"
@@ -551,7 +554,7 @@ async def handle_help_command(
             value=(
                 "Dashboard admins can toggle quiet mode, event mode, "
                 "welcomes, returners, chronicles, and Ship World; "
-                "set Ship World/welcome/chronicle channel IDs; set "
+                "set Ship World/welcome/chronicle/conversation channel IDs; set "
                 "Captain mood; and choose which dashboard users can "
                 "view global info or specific servers. Use Discord "
                 "commands when you need channel mentions or live command feedback."
@@ -709,6 +712,7 @@ async def handle_help_command(
                 "`!c chronicle now`\n"
                 "`!c ship channel/on/off/status`\n"
                 "`!c quiet on/off`\n"
+                "`!c conversation status/channel/off`\n"
                 "`!c mood <mood>`\n"
                 "`!c event on/off`\n"
                 "`!c ai` / `!c ai status`\n"

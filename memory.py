@@ -610,6 +610,7 @@ async def initialize_database():
                 event_mode INTEGER DEFAULT 0,
                 welcome_enabled INTEGER DEFAULT 0,
                 welcome_channel_id INTEGER DEFAULT 0,
+                conversation_channel_id INTEGER DEFAULT 0,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -683,7 +684,8 @@ async def initialize_database():
             ("returning_days", "INTEGER DEFAULT 14"),
             ("chronicle_enabled", "INTEGER DEFAULT 0"),
             ("chronicle_channel_id", "INTEGER DEFAULT 0"),
-            ("chronicle_last_run", "DATETIME")
+            ("chronicle_last_run", "DATETIME"),
+            ("conversation_channel_id", "INTEGER DEFAULT 0")
         ):
             if not await column_exists(db, "guild_settings", column):
                 await db.execute(
@@ -2339,7 +2341,8 @@ async def get_guild_settings(
             returning_days,
             chronicle_enabled,
             chronicle_channel_id,
-            chronicle_last_run
+            chronicle_last_run,
+            conversation_channel_id
         FROM guild_settings
         WHERE guild_id = ?
     """, (
@@ -2374,7 +2377,8 @@ async def get_guild_settings(
         "returning_days": (int(row[6] or 14) if row else 14),
         "chronicle_enabled": (bool(row[7]) if row else False),
         "chronicle_channel_id": (int(row[8] or 0) if row else 0),
-        "chronicle_last_run": (row[9] if row else None)
+        "chronicle_last_run": (row[9] if row else None),
+        "conversation_channel_id": (int(row[10] or 0) if row else 0)
     }
 
 
@@ -2394,7 +2398,8 @@ async def set_guild_setting(
         "returning_days",
         "chronicle_enabled",
         "chronicle_channel_id",
-        "chronicle_last_run"
+        "chronicle_last_run",
+        "conversation_channel_id"
     }
 
     if field not in allowed:

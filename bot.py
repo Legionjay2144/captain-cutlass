@@ -384,7 +384,7 @@ CONTEXT_ACHIEVEMENTS = int(
 CACHE_SECONDS = int(
     os.getenv(
         "CACHE_SECONDS",
-        "300"
+        "30"
     )
 )
 
@@ -600,6 +600,25 @@ def channel_allowed(
     return (
         message.channel.id
         in ALLOWED_CHANNELS
+    )
+
+
+def conversation_channel_allowed(
+    message,
+    settings
+):
+
+    channel_id = int(
+        settings.get(
+            "conversation_channel_id",
+            0
+        )
+        or 0
+    )
+
+    return (
+        channel_id == 0
+        or message.channel.id == channel_id
     )
 
 
@@ -4663,7 +4682,8 @@ async def handle_commands(
         set_guild_setting=set_guild_setting,
         invalidate_settings_cache=invalidate_settings_cache,
         get_ai_status=lambda: ai,
-        format_ai_status=format_ai_status
+        format_ai_status=format_ai_status,
+        cached_settings=cached_settings
     ):
         return True
 
@@ -6442,6 +6462,17 @@ async def on_message(
         punbattle_mode = content_lower in PUNBATTLE_COMMANDS
 
 
+        settings = await cached_settings(
+            message.guild.id
+        )
+
+
+        conversation_allowed = conversation_channel_allowed(
+            message,
+            settings
+        )
+
+
         previous_meta = await get_member_meta(
             message.guild.id,
             message.author.id
@@ -6481,10 +6512,11 @@ async def on_message(
         )
 
 
-        await maybe_greet_returning(
-            message,
-            previous_meta
-        )
+        if conversation_allowed:
+            await maybe_greet_returning(
+                message,
+                previous_meta
+            )
 
         await touch_member_seen(
             message.guild.id,
@@ -6538,6 +6570,19 @@ async def on_message(
             ):
 
                 return
+
+
+        if not conversation_allowed:
+            await save_message(
+                message.guild.id,
+                message.channel.id,
+                message.author.id,
+                message.author.display_name,
+                message.content,
+                discord_message_id=message.id,
+                timestamp=message.created_at.isoformat()
+            )
+            return
 
 
         # -------------------------------------------------
@@ -6619,11 +6664,6 @@ async def on_message(
             or direct_reply
             or story_mode
             or punbattle_mode
-        )
-
-
-        settings = await cached_settings(
-            message.guild.id
         )
 
 

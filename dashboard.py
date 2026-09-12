@@ -63,6 +63,10 @@ def table_exists(conn, table):
     return row is not None
 
 
+def column_exists_sync(conn, table, column):
+    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
+
+
 def rows(conn, sql, params=()):
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
@@ -1019,6 +1023,22 @@ def dashboard_set_welcome_channel(guild_id, channel_id):
     return {"ok": True, "channel_id": channel_id}
 
 
+def dashboard_set_conversation_channel(guild_id, channel_id):
+    guild_id = safe_int(guild_id)
+    channel_id = safe_int(channel_id)
+    if channel_id < 0:
+        raise ValueError("Channel ID must be 0 or a positive Discord channel ID.")
+    with db_write_connect() as conn:
+        if not table_exists(conn, "guild_settings"):
+            raise ValueError("guild_settings table is missing")
+        if not column_exists_sync(conn, "guild_settings", "conversation_channel_id"):
+            conn.execute("ALTER TABLE guild_settings ADD COLUMN conversation_channel_id INTEGER DEFAULT 0")
+        conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
+        conn.execute("UPDATE guild_settings SET conversation_channel_id=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=?", (channel_id, guild_id))
+        conn.commit()
+    return {"ok": True, "channel_id": channel_id}
+
+
 def dashboard_set_mood(guild_id, mood):
     guild_id = safe_int(guild_id)
     mood = clean_text(str(mood or "").strip(), 60)
@@ -1516,7 +1536,7 @@ function renderGuild() {
     `, 'span-4')}
     ${card(`Server Overview — ${esc(guild.guild_name || selectedGuild)}`, `
       <div class="stats">
-        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Welcome', settings.welcome_enabled ? 'On' : 'Off')}${stat('Returners', settings.returning_enabled ? 'On' : 'Off')}${stat('Events', settings.event_mode ? 'On' : 'Off')}${stat('Ship World', shipSettings.enabled ? 'On' : 'Off')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
+        ${stat('Mood', settings.mood || 'unset')}${stat('Quiet', settings.quiet ? 'On' : 'Off')}${stat('Chronicle', settings.chronicle_enabled ? 'On' : 'Off')}${stat('Welcome', settings.welcome_enabled ? 'On' : 'Off')}${stat('Returners', settings.returning_enabled ? 'On' : 'Off')}${stat('Events', settings.event_mode ? 'On' : 'Off')}${stat('Ship World', shipSettings.enabled ? 'On' : 'Off')}${stat('Conversation', settings.conversation_channel_id ? 'Locked' : 'Any')}${stat('Members', counts.members || 0)}${stat('Profiles', counts.profiles || 0)}${stat('Messages', counts.messages || 0)}${stat('Imported', counts.history_imported || 0)}${stat('Import Channels', counts.history_import_channels || 0)}${stat('Achievements', counts.achievements || 0)}${stat('Discoveries', counts.discoveries || 0)}${stat('History Entries', counts.ship_history || 0)}${stat('Crew Work Runs', counts.crew_work_runs || 0)}
       </div>
     `, 'span-8')}
     ${card('Bot Controls', botControls(settings, shipSettings), 'span-12')}
@@ -1566,7 +1586,12 @@ function botControls(settings, shipSettings) {
       <button type="button" onclick="setDashboardChannel('chronicle','chronicleChannelId')">Set Chronicle Channel</button>
       <button type="button" onclick="clearDashboardChannel('chronicle','chronicleChannelId')">Clear Chronicle Channel</button>
     </div>
-    <p class="muted">These buttons update the same database settings as Discord admin commands. Use Discord channel IDs for channel fields.</p>
+    <div class="toolbar" style="margin-top:12px">
+      <input id="conversationChannelId" placeholder="Conversation lock channel ID" value="${esc(settings.conversation_channel_id || '')}">
+      <button type="button" onclick="setDashboardChannel('conversation','conversationChannelId')">Lock Conversation Channel</button>
+      <button type="button" onclick="clearDashboardChannel('conversation','conversationChannelId')">Allow Conversation Anywhere</button>
+    </div>
+    <p class="muted">Conversation lock limits generated chat, direct mention replies, random chatter, reactions, natural help, and tickle responses to one channel. Commands still work elsewhere. Use Discord channel IDs for channel fields.</p>
   `;
 }
 
@@ -2169,6 +2194,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     result = dashboard_set_chronicle_channel(guild_id, payload.get("channel_id"))
                 elif target == "welcome":
                     result = dashboard_set_welcome_channel(guild_id, payload.get("channel_id"))
+                elif target == "conversation":
+                    result = dashboard_set_conversation_channel(guild_id, payload.get("channel_id"))
                 else:
                     raise ValueError("Unknown channel target.")
             except ValueError as exc:
