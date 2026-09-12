@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -27,6 +28,10 @@ DASHBOARD_SESSION_SECRET = (
 )
 DASHBOARD_SESSION_SECONDS = int(os.getenv("DASHBOARD_SESSION_SECONDS", "86400"))
 DASHBOARD_COOKIE_NAME = "cutlass_dashboard_session"
+DASHBOARD_ASSETS = {
+    "/assets/cutlass.png": Path(__file__).with_name("cutlass.png"),
+    "/assets/banner.png": Path(__file__).with_name("banner.png"),
+}
 PASSWORD_HASH_ITERATIONS = 260000
 
 TEXT_LIMIT = 500
@@ -1070,70 +1075,83 @@ INDEX_HTML = r"""
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Captain Cutlass Quarterdeck</title>
   <style>
-    :root { color-scheme: dark; --bg:#0b0704; --deck:#140c07; --wood:#251408; --wood2:#3a2110; --panel:#1c120a; --panel2:#2b1b0d; --paper:#f1d79a; --text:#f8ecd2; --muted:#c9a875; --gold:#f4c45b; --rum:#b86b2d; --red:#d94b35; --green:#7ecf7a; --blue:#74a6c6; --line:#6f4921; --ink:#140c07; }
+    :root { color-scheme: dark; --bg:#020506; --void:#000; --panel:#071114; --panel2:#0c1b20; --steel:#1c2529; --steel2:#2d3437; --text:#f4f7f4; --muted:#8eb6bd; --cyan:#10e7ef; --cyan2:#00a6b8; --gold:#d7a23a; --gold2:#8f6420; --red:#9d2f2f; --green:#65e49a; --line:rgba(16,231,239,.42); --dimline:rgba(16,231,239,.18); }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: Georgia, 'Trebuchet MS', ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
-      radial-gradient(circle at 18% 8%, rgba(244,196,91,.18), transparent 28%),
-      radial-gradient(circle at 82% 4%, rgba(116,166,198,.12), transparent 24%),
-      linear-gradient(135deg, rgba(255,255,255,.035) 25%, transparent 25%) 0 0/42px 42px,
-      linear-gradient(45deg, rgba(255,255,255,.025) 25%, transparent 25%) 0 0/38px 38px,
-      linear-gradient(180deg, #15100b 0%, var(--bg) 62%, #050302 100%); }
-    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.58) 100%); z-index:-1; }
-    header { padding:30px clamp(16px,4vw,52px); border-bottom:3px double var(--line); background:linear-gradient(180deg, rgba(39,23,10,.94), rgba(14,8,4,.88)); position:sticky; top:0; backdrop-filter: blur(10px); z-index:3; box-shadow:0 14px 38px rgba(0,0,0,.42), inset 0 -1px rgba(244,196,91,.2); }
-    h1 { margin:0; font-size: clamp(28px, 4vw, 48px); letter-spacing:.01em; color:var(--paper); text-shadow:0 2px 0 #000, 0 0 18px rgba(244,196,91,.24); }
-    h1::before { content:'☠ '; color:var(--gold); }
-    h1::after { content:' ⚓'; color:var(--gold); }
-    h2 { margin:0 0 14px; font-size:21px; color:var(--paper); text-shadow:0 1px 0 #000; }
-    h3 { margin:0 0 8px; font-size:16px; color:var(--gold); letter-spacing:.02em; }
-    .sub { color:var(--muted); margin-top:8px; }
+    body { margin:0; font-family: 'Trebuchet MS', Inter, ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
+      radial-gradient(circle at 22% 12%, rgba(16,231,239,.18), transparent 30%),
+      radial-gradient(circle at 86% 6%, rgba(215,162,58,.12), transparent 24%),
+      linear-gradient(90deg, rgba(16,231,239,.05) 1px, transparent 1px) 0 0/48px 48px,
+      linear-gradient(0deg, rgba(16,231,239,.035) 1px, transparent 1px) 0 0/48px 48px,
+      linear-gradient(180deg, #061014 0%, var(--bg) 58%, #000 100%); }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,.68) 100%), linear-gradient(180deg, rgba(16,231,239,.04), transparent 18%, rgba(0,0,0,.4)); z-index:-1; }
+    header { min-height:300px; padding:26px clamp(16px,4vw,52px); border-bottom:1px solid var(--line); background:
+      linear-gradient(90deg, rgba(0,0,0,.32), rgba(0,0,0,.05) 38%, rgba(0,0,0,.76) 78%),
+      linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.82)),
+      url('/assets/banner.png') center/cover no-repeat; position:relative; overflow:hidden; box-shadow:0 18px 58px rgba(0,0,0,.62), inset 0 -1px rgba(16,231,239,.35); }
+    header::before { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg, transparent, rgba(16,231,239,.16), transparent) top/100% 1px no-repeat, linear-gradient(90deg, transparent, rgba(16,231,239,.11), transparent) bottom/100% 1px no-repeat; }
+    header::after { content:'SYSTEM ONLINE   •   CREW: DASHBOARD   •   STATUS: UNSTOPPABLE'; position:absolute; right:clamp(16px,4vw,52px); top:22px; color:var(--cyan); font:700 12px/1.4 'Courier New', monospace; letter-spacing:.08em; text-shadow:0 0 10px rgba(16,231,239,.8); opacity:.88; }
+    .brand { position:relative; min-height:240px; display:flex; align-items:flex-end; gap:18px; max-width:900px; }
+    .brand-mark { width:120px; height:120px; border-radius:50%; object-fit:cover; border:2px solid var(--cyan); background:#000; box-shadow:0 0 0 4px rgba(0,0,0,.55), 0 0 34px rgba(16,231,239,.72); }
+    .brand-copy { padding:18px 20px; border:1px solid var(--line); background:linear-gradient(90deg, rgba(0,0,0,.72), rgba(4,16,20,.42)); box-shadow:inset 0 0 0 1px rgba(215,162,58,.14), 0 10px 34px rgba(0,0,0,.42); clip-path:polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px)); }
+    h1 { margin:0; font-size: clamp(34px, 5vw, 66px); letter-spacing:.045em; color:#f6f2e8; text-transform:uppercase; text-shadow:0 3px 0 #000, 0 0 22px rgba(16,231,239,.55); }
+    h1::before, h1::after { content:''; }
+    h2 { margin:0 0 14px; font-size:21px; color:#f6f2e8; text-shadow:0 1px 0 #000, 0 0 12px rgba(16,231,239,.3); text-transform:uppercase; letter-spacing:.03em; }
+    h3 { margin:0 0 8px; font-size:16px; color:var(--cyan); letter-spacing:.08em; text-transform:uppercase; text-shadow:0 0 10px rgba(16,231,239,.55); }
+    .sub { color:#c8e8ed; margin-top:8px; letter-spacing:.03em; text-shadow:0 1px 0 #000; }
     main { padding:24px clamp(16px,4vw,48px) 60px; display:grid; gap:20px; }
     .toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    select, input, button { background:linear-gradient(180deg, #2b1b0d, #160d07); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 2px 8px rgba(0,0,0,.25); }
-    input::placeholder { color:#9f8158; }
-    button { cursor:pointer; background:linear-gradient(180deg, #8f5722, #553014); color:#fff4d7; border-color:#b07833; font-weight:700; text-shadow:0 1px #000; }
-    button:hover { border-color:var(--gold); box-shadow:0 0 0 2px rgba(244,196,91,.18), 0 8px 22px rgba(0,0,0,.28); transform:translateY(-1px); }
+    select, input, button { background:linear-gradient(180deg, #0b191d, #030708); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:10px 12px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 0 16px rgba(16,231,239,.08); }
+    input::placeholder { color:#638990; }
+    button { cursor:pointer; background:linear-gradient(180deg, rgba(16,231,239,.22), rgba(0,107,120,.22)), #071114; color:#dffcff; border-color:rgba(16,231,239,.72); font-weight:800; text-transform:uppercase; letter-spacing:.06em; text-shadow:0 0 8px rgba(16,231,239,.7); }
+    button:hover { border-color:var(--gold); color:#fff6d8; box-shadow:0 0 0 2px rgba(16,231,239,.18), 0 0 24px rgba(16,231,239,.24); transform:translateY(-1px); }
     .grid { display:grid; grid-template-columns: repeat(12, 1fr); gap:16px; }
-    .card { background:linear-gradient(180deg, rgba(47,29,13,.97), rgba(20,12,6,.97)); border:2px solid rgba(111,73,33,.9); border-radius:18px; padding:18px; box-shadow:0 14px 42px rgba(0,0,0,.38), inset 0 0 0 1px rgba(244,196,91,.08); position:relative; overflow:hidden; }
-    .card::before { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg, transparent, rgba(244,196,91,.035), transparent), radial-gradient(circle at top right, rgba(244,196,91,.08), transparent 34%); }
+    .card { background:linear-gradient(180deg, rgba(8,20,24,.96), rgba(2,6,8,.98)); border:1px solid var(--line); border-radius:10px; padding:18px; box-shadow:0 14px 42px rgba(0,0,0,.48), inset 0 0 0 1px rgba(215,162,58,.1); position:relative; overflow:hidden; }
+    .card::before { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg, transparent, rgba(16,231,239,.045), transparent), radial-gradient(circle at top right, rgba(16,231,239,.12), transparent 34%); }
+    .card::after { content:''; position:absolute; left:12px; right:12px; top:0; height:1px; background:linear-gradient(90deg, transparent, var(--cyan), transparent); opacity:.72; }
     .card > * { position:relative; }
     .span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-6 { grid-column: span 6; } .span-4 { grid-column: span 4; } .span-3 { grid-column: span 3; }
     .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
-    .stat { background:linear-gradient(180deg, rgba(241,215,154,.1), rgba(0,0,0,.12)); border:1px solid rgba(244,196,91,.22); border-radius:14px; padding:12px; }
-    .stat b { display:block; font-size:25px; color:var(--gold); text-shadow:0 1px 0 #000; }
-    .stat span { color:var(--muted); font-size:13px; }
+    .stat { background:linear-gradient(180deg, rgba(16,231,239,.09), rgba(0,0,0,.18)); border:1px solid var(--dimline); border-radius:8px; padding:12px; }
+    .stat b { display:block; font-size:25px; color:var(--cyan); text-shadow:0 0 12px rgba(16,231,239,.65); }
+    .stat span { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.05em; }
     table { width:100%; border-collapse:collapse; }
-    th,td { padding:10px 8px; border-bottom:1px solid rgba(244,196,91,.13); text-align:left; vertical-align:top; }
-    th { color:var(--gold); font-size:12px; text-transform:uppercase; letter-spacing:.1em; }
+    th,td { padding:10px 8px; border-bottom:1px solid rgba(16,231,239,.12); text-align:left; vertical-align:top; }
+    th { color:var(--cyan); font-size:12px; text-transform:uppercase; letter-spacing:.1em; }
     tr.clickable { cursor:pointer; }
-    tr.clickable:hover { background:rgba(244,196,91,.1); }
-    .pill { display:inline-block; border:1px solid rgba(244,196,91,.28); background:rgba(0,0,0,.18); border-radius:999px; padding:3px 9px; color:#e8c988; font-size:12px; margin:2px; }
-    .bar { height:10px; background:#2f1c0e; border:1px solid rgba(244,196,91,.2); border-radius:999px; overflow:hidden; }
-    .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--green),var(--gold),#d98b35); }
+    tr.clickable:hover { background:rgba(16,231,239,.08); }
+    .pill { display:inline-block; border:1px solid rgba(16,231,239,.28); background:rgba(0,0,0,.24); border-radius:4px; padding:3px 9px; color:#9ff8ff; font-size:12px; margin:2px; }
+    .bar { height:10px; background:#071114; border:1px solid rgba(16,231,239,.25); border-radius:999px; overflow:hidden; }
+    .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--cyan2),var(--cyan),var(--gold)); box-shadow:0 0 14px rgba(16,231,239,.5); }
     .muted { color:var(--muted); } .gold { color:var(--gold); } .green { color:var(--green); } .red { color:var(--red); }
     .list { display:grid; gap:8px; max-height:440px; overflow:auto; padding-right:4px; }
     .profile-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
-    .profile-card { padding:14px; background:linear-gradient(180deg, rgba(241,215,154,.085), rgba(0,0,0,.16)); border:1px solid rgba(244,196,91,.2); border-radius:16px; cursor:pointer; min-height:190px; display:flex; flex-direction:column; gap:10px; }
-    .profile-card:hover { border-color:var(--gold); background:rgba(244,196,91,.11); transform:translateY(-1px); }
+    .profile-card { padding:14px; background:linear-gradient(180deg, rgba(16,231,239,.07), rgba(0,0,0,.18)); border:1px solid var(--dimline); border-radius:10px; cursor:pointer; min-height:190px; display:flex; flex-direction:column; gap:10px; }
+    .profile-card:hover { border-color:var(--cyan); background:rgba(16,231,239,.1); transform:translateY(-1px); box-shadow:0 0 22px rgba(16,231,239,.14); }
     .profile-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-    .profile-card p { margin:0; color:#f3dfb5; line-height:1.45; }
-    .personality-type { padding:11px; border:1px solid rgba(244,196,91,.32); background:linear-gradient(180deg, rgba(244,196,91,.12), rgba(0,0,0,.14)); border-radius:13px; display:grid; gap:6px; }
+    .profile-card p { margin:0; color:#d8edef; line-height:1.45; }
+    .personality-type { padding:11px; border:1px solid rgba(215,162,58,.38); background:linear-gradient(180deg, rgba(215,162,58,.12), rgba(0,0,0,.14)); border-radius:8px; display:grid; gap:6px; }
     .personality-type strong { color:var(--gold); font-size:15px; }
     .personality-type > span { color:var(--muted); font-size:12px; }
-    .item { padding:10px 12px; background:rgba(0,0,0,.18); border:1px solid rgba(244,196,91,.16); border-radius:12px; }
+    .item { padding:10px 12px; background:rgba(0,0,0,.22); border:1px solid rgba(16,231,239,.16); border-radius:8px; }
     .item small { color:var(--muted); display:block; margin-top:4px; }
-    dialog { width:min(980px, calc(100vw - 28px)); border:2px solid var(--line); border-radius:18px; background:#160d07; color:var(--text); padding:0; box-shadow:0 20px 70px rgba(0,0,0,.58); }
-    dialog::backdrop { background:rgba(0,0,0,.68); backdrop-filter: blur(4px); }
-    .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px; border-bottom:2px solid var(--line); background:linear-gradient(180deg, #2e1b0d, #160d07); }
+    dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:10px; background:#030708; color:var(--text); padding:0; box-shadow:0 20px 70px rgba(0,0,0,.68), 0 0 34px rgba(16,231,239,.16); }
+    dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter: blur(4px); }
+    .modal-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:18px; border-bottom:1px solid var(--line); background:linear-gradient(180deg, #0b191d, #030708); }
     .modal-body { padding:18px; max-height:75vh; overflow:auto; }
-    pre { white-space:pre-wrap; background:rgba(0,0,0,.28); border:1px solid rgba(244,196,91,.2); padding:12px; border-radius:12px; color:#f6dfad; }
-    ::selection { background:rgba(244,196,91,.35); }
-    @media (max-width: 900px) { .span-8,.span-6,.span-4,.span-3 { grid-column:span 12; } }
+    pre { white-space:pre-wrap; background:rgba(0,0,0,.32); border:1px solid rgba(16,231,239,.18); padding:12px; border-radius:8px; color:#dffcff; }
+    ::selection { background:rgba(16,231,239,.35); }
+    @media (max-width: 900px) { header { min-height:230px; } .brand { min-height:170px; align-items:flex-end; } .brand-mark { width:86px; height:86px; } .span-8,.span-6,.span-4,.span-3 { grid-column:span 12; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>Captain Cutlass Quarterdeck</h1>
-  <div class="sub">A captain's chart table for crew profiles, Living Ship stats, world history, jobs, and achievements.</div>
+  <div class="brand">
+    <img class="brand-mark" src="/assets/cutlass.png" alt="Captain Cutlass crest">
+    <div class="brand-copy">
+      <h1>Captain Cutlass</h1>
+      <div class="sub">Quarterdeck dashboard for crew profiles, Living Ship stats, world history, jobs, and achievements.</div>
+    </div>
+  </div>
 </header>
 <main>
   <section class="toolbar card">
@@ -1489,31 +1507,32 @@ LOGIN_HTML = r"""
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Captain Cutlass Quarterdeck Login</title>
   <style>
-    :root { color-scheme: dark; --bg:#0b0704; --panel:#1c120a; --paper:#f1d79a; --text:#f8ecd2; --muted:#c9a875; --gold:#f4c45b; --red:#d94b35; --line:#6f4921; }
+    :root { color-scheme: dark; --bg:#020506; --panel:#071114; --text:#f4f7f4; --muted:#8eb6bd; --cyan:#10e7ef; --gold:#d7a23a; --red:#9d2f2f; --line:rgba(16,231,239,.42); }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; font-family:Georgia, 'Trebuchet MS', ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
-      radial-gradient(circle at 20% 10%, rgba(244,196,91,.2), transparent 30%),
-      radial-gradient(circle at 80% 0%, rgba(116,166,198,.12), transparent 26%),
-      linear-gradient(135deg, rgba(255,255,255,.035) 25%, transparent 25%) 0 0/42px 42px,
-      linear-gradient(180deg, #15100b 0%, var(--bg) 70%, #050302 100%); }
-    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at center, transparent 34%, rgba(0,0,0,.62) 100%); }
-    main { width:min(440px, 100%); background:linear-gradient(180deg, rgba(47,29,13,.97), rgba(20,12,6,.98)); border:2px solid var(--line); border-radius:22px; padding:28px; box-shadow:0 22px 70px rgba(0,0,0,.55), inset 0 0 0 1px rgba(244,196,91,.1); position:relative; overflow:hidden; }
-    main::before { content:'⚓'; position:absolute; right:18px; top:10px; color:rgba(244,196,91,.16); font-size:82px; transform:rotate(-12deg); }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; font-family:'Trebuchet MS', Inter, ui-sans-serif, system-ui, sans-serif; color:var(--text); background:
+      linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,.72)),
+      linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.84)),
+      url('/assets/banner.png') center/cover no-repeat fixed,
+      #000; }
+    body::before { content:''; position:fixed; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 42%, rgba(16,231,239,.14), transparent 32%), radial-gradient(ellipse at center, transparent 34%, rgba(0,0,0,.68) 100%); }
+    main { width:min(470px, 100%); background:linear-gradient(180deg, rgba(8,20,24,.94), rgba(2,6,8,.98)); border:1px solid var(--line); border-radius:12px; padding:28px; box-shadow:0 24px 80px rgba(0,0,0,.68), 0 0 38px rgba(16,231,239,.18), inset 0 0 0 1px rgba(215,162,58,.12); position:relative; overflow:hidden; }
+    main::before { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg, transparent, rgba(16,231,239,.06), transparent), radial-gradient(circle at top right, rgba(16,231,239,.15), transparent 34%); }
     main > * { position:relative; }
-    h1 { margin:0 0 8px; font-size:32px; letter-spacing:.01em; color:var(--paper); text-shadow:0 2px 0 #000, 0 0 18px rgba(244,196,91,.25); }
-    h1::before { content:'☠ '; color:var(--gold); }
-    p { margin:0 0 22px; color:var(--muted); line-height:1.5; }
-    label { display:grid; gap:7px; margin:14px 0; color:var(--muted); }
-    input, button { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px 13px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 2px 8px rgba(0,0,0,.25); }
-    input { background:#160d07; color:var(--text); }
-    button { margin-top:8px; cursor:pointer; background:linear-gradient(180deg, #8f5722, #553014); color:#fff4d7; border-color:#b07833; font-weight:700; text-shadow:0 1px #000; }
-    button:hover { border-color:var(--gold); box-shadow:0 0 0 2px rgba(244,196,91,.18), 0 8px 22px rgba(0,0,0,.28); }
-    .error { margin-bottom:14px; padding:10px 12px; border:1px solid rgba(217,75,53,.45); background:rgba(217,75,53,.12); border-radius:12px; color:#ffd3c7; }
+    .login-mark { width:132px; height:132px; display:block; margin:0 auto 14px; border-radius:50%; object-fit:cover; border:2px solid var(--cyan); background:#000; box-shadow:0 0 0 4px rgba(0,0,0,.55), 0 0 34px rgba(16,231,239,.72); }
+    h1 { margin:0 0 8px; font-size:34px; letter-spacing:.06em; text-transform:uppercase; color:#f6f2e8; text-align:center; text-shadow:0 2px 0 #000, 0 0 18px rgba(16,231,239,.55); }
+    p { margin:0 0 22px; color:var(--muted); line-height:1.5; text-align:center; }
+    label { display:grid; gap:7px; margin:14px 0; color:var(--cyan); text-transform:uppercase; font-size:12px; letter-spacing:.08em; }
+    input, button { width:100%; border:1px solid var(--line); border-radius:6px; padding:12px 13px; font:inherit; box-shadow:inset 0 1px rgba(255,255,255,.06), 0 0 16px rgba(16,231,239,.08); }
+    input { background:#030708; color:var(--text); }
+    button { margin-top:8px; cursor:pointer; background:linear-gradient(180deg, rgba(16,231,239,.22), rgba(0,107,120,.22)), #071114; color:#dffcff; border-color:rgba(16,231,239,.72); font-weight:800; text-transform:uppercase; letter-spacing:.06em; text-shadow:0 0 8px rgba(16,231,239,.7); }
+    button:hover { border-color:var(--gold); color:#fff6d8; box-shadow:0 0 0 2px rgba(16,231,239,.18), 0 0 24px rgba(16,231,239,.24); }
+    .error { margin-bottom:14px; padding:10px 12px; border:1px solid rgba(157,47,47,.65); background:rgba(157,47,47,.18); border-radius:8px; color:#ffd3c7; text-align:left; }
     .gold { color:var(--gold); }
   </style>
 </head>
 <body>
   <main>
+    <img class="login-mark" src="/assets/cutlass.png" alt="Captain Cutlass crest">
     <h1>Captain Cutlass</h1>
     <p>Show yer papers to enter the quarterdeck and inspect crew profiles, Living Ship stats, world history, jobs, and achievements.</p>
     {error}
@@ -1615,9 +1634,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         error_html = f'<div class="error">{error}</div>' if error else ""
         self.send_html(LOGIN_HTML.replace("{error}", error_html), status=status)
 
+    def send_asset(self, path):
+        asset_path = DASHBOARD_ASSETS.get(path)
+        if not asset_path or not asset_path.exists():
+            self.send_json({"error": "asset not found"}, 404)
+            return
+        data = asset_path.read_bytes()
+        content_type = mimetypes.guess_type(str(asset_path))[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+
+        if path in DASHBOARD_ASSETS:
+            self.send_asset(path)
+            return
 
         if path == "/login":
             if self.authorized():
