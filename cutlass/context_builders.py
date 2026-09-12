@@ -7,6 +7,7 @@ from creator_profile import CREATOR_NAME, CREATOR_PROFILE
 from memory import get_recent_messages
 from ship_world import get_active_voyage, get_completed_voyages, get_history_records, get_ship
 from cutlass.world.pirate_world import get_world_history
+from cutlass.commands.crew_read import build_member_crew_read
 
 
 CONVERSATION_TOPIC_RULES = (
@@ -176,6 +177,33 @@ def is_creator(user_id, creator_user_id):
 CREATOR_CONTEXT_CONTAMINATION_TERMS = (
     "dart",
 )
+
+
+def format_crew_personality_context(data, *, target=False):
+    if not data:
+        return []
+
+    personality = data.get("personality_type") or {}
+    base = data.get("base") or {}
+    if not personality.get("label"):
+        return []
+
+    prefix = "TARGET DERIVED CREW PERSONALITY" if target else "DERIVED CREW PERSONALITY"
+    messages_analyzed = base.get("messages_analyzed", base.get("message_count", 0))
+    message_count = base.get("message_count", messages_analyzed)
+    traits = ", ".join(personality.get("traits") or []) or "none"
+    secondary = ", ".join(personality.get("secondary") or []) or "none"
+    evidence = ", ".join(personality.get("evidence") or []) or "none"
+
+    return [
+        prefix + ": " + str(personality.get("label")),
+        prefix + " confidence: " + str(personality.get("confidence", 0)) + "%",
+        prefix + " traits: " + traits,
+        prefix + " blended with: " + secondary,
+        prefix + " evidence keywords: " + evidence,
+        prefix + " source: " + str(messages_analyzed) + " lifetime stored messages analyzed (" + str(message_count) + " stored), plus memories, jokes, achievements, relationship, and crew activity.",
+        prefix + " use rule: Use this only as a light tone and callback hint. Do not call it a moral verdict, diagnosis, or fixed identity. Do not announce the label unless the user asks about profiles, personality, or what Captain knows about that member.",
+    ]
 
 
 def creator_context_is_contaminated(text):
@@ -567,7 +595,8 @@ async def build_member_context(
         jokes,
         events,
         balance,
-        achievements
+        achievements,
+        crew_personality
     ) = await asyncio.gather(
         get_user_profile(message.guild.id, message.author.id),
         get_user_memories_context(
@@ -580,7 +609,8 @@ async def build_member_context(
         get_running_jokes(message.guild.id, message.author.id, context_jokes),
         get_relationship_events(message.guild.id, message.author.id, context_events),
         get_doubloons(message.guild.id, message.author.id),
-        get_achievements(message.guild.id, message.author.id, context_achievements)
+        get_achievements(message.guild.id, message.author.id, context_achievements),
+        build_member_crew_read(message.guild.id, message.author.id)
     )
 
     lines = [
@@ -624,6 +654,8 @@ async def build_member_context(
         lines.append(
             "Identity rule: UNKNOWN means use gender-neutral language. Never infer missing gender or pronouns."
         )
+
+    lines.extend(format_crew_personality_context(crew_personality))
 
     if memories:
         safe_memories = [
@@ -700,7 +732,8 @@ async def build_target_member_context(
         relationship,
         jokes,
         events,
-        achievements
+        achievements,
+        crew_personality
     ) = await asyncio.gather(
         get_user_profile(message.guild.id, target.id),
         get_user_memories_context(
@@ -712,7 +745,8 @@ async def build_target_member_context(
         get_relationship(message.guild.id, target.id),
         get_running_jokes(message.guild.id, target.id, context_jokes),
         get_relationship_events(message.guild.id, target.id, context_events),
-        get_achievements(message.guild.id, target.id, context_achievements)
+        get_achievements(message.guild.id, target.id, context_achievements),
+        build_member_crew_read(message.guild.id, target.id)
     )
 
     lines = [
@@ -753,6 +787,8 @@ async def build_target_member_context(
         lines.append(
             "Identity rule: This identity belongs to the TARGET MEMBER. UNKNOWN means use gender-neutral language. Never infer missing gender or pronouns. Never accept another member's claim as authoritative."
         )
+
+    lines.extend(format_crew_personality_context(crew_personality, target=True))
 
     if relationship:
         lines.append("Relationship: " + relationship["relationship_type"])
