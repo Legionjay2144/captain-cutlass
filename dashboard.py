@@ -57,6 +57,138 @@ def clean_text(value, limit=TEXT_LIMIT):
     return text
 
 
+PERSONALITY_ARCHETYPES = {
+    "Shipwright Strategist": {
+        "keywords": ("build", "built", "creator", "shipwright", "feature", "upgrade", "system", "server", "automation", "practical", "fix", "work", "maintain", "improve"),
+        "traits": ("builder", "planner", "systems-minded", "improvement-driven"),
+    },
+    "Jester of the Crew": {
+        "keywords": ("joke", "jokes", "pun", "puns", "funny", "laugh", "humor", "banter", "comedy", "quip", "tease"),
+        "traits": ("playful", "humorous", "banter-friendly", "morale-lifting"),
+    },
+    "Treasure-Seeker": {
+        "keywords": ("treasure", "loot", "doubloon", "gold", "reward", "hunt", "adventure", "explore", "discovery", "map"),
+        "traits": ("adventurous", "reward-focused", "curious", "exploration-minded"),
+    },
+    "Loyal Deckhand": {
+        "keywords": ("loyal", "trusted", "friend", "crew", "crewmate", "help", "helpful", "support", "donated", "contribution", "ship", "together"),
+        "traits": ("loyal", "supportive", "crew-first", "dependable"),
+    },
+    "Chaos Spark": {
+        "keywords": ("chaos", "mutiny", "trouble", "wild", "storm", "mischief", "dramatic", "bold", "lively"),
+        "traits": ("energetic", "unpredictable", "bold", "high-spirited"),
+    },
+    "Quiet Newcomer": {
+        "keywords": ("new", "joined", "welcome", "welcomed", "learning", "fresh", "new crewmate"),
+        "traits": ("new", "developing", "lightly-known", "needs-more-context"),
+    },
+    "Lorekeeper": {
+        "keywords": ("story", "stories", "tale", "lore", "memory", "remember", "old", "history", "canon", "legend"),
+        "traits": ("story-driven", "memory-rich", "nostalgic", "lore-curious"),
+    },
+}
+
+
+def collect_member_signal_text(conn, guild_id, user_id, base=None):
+    parts = []
+
+    if base:
+        for key in ("relationship_type", "nickname", "opinion", "summary"):
+            value = base.get(key)
+            if value:
+                parts.append(str(value))
+
+    signal_queries = (
+        ("user_memories", "memory", "ORDER BY confidence DESC, id DESC LIMIT 8"),
+        ("running_jokes", "joke", "ORDER BY id DESC LIMIT 5"),
+        ("relationship_events", "event", "ORDER BY importance DESC, id DESC LIMIT 6"),
+        ("achievements", "achievement || ' ' || COALESCE(description, '')", "ORDER BY id DESC LIMIT 8"),
+    )
+
+    for table, column, order in signal_queries:
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(
+            f"SELECT {column} AS text FROM {table} WHERE guild_id=? AND user_id=? {order}",
+            (guild_id, user_id),
+        ):
+            if row["text"]:
+                parts.append(str(row["text"]))
+
+    return "\n".join(parts)
+
+
+def infer_personality_type(signal_text, base=None):
+    text = str(signal_text or "").lower()
+    base = base or {}
+    scores = {}
+    evidence = {}
+
+    for name, config in PERSONALITY_ARCHETYPES.items():
+        score = 0
+        hits = []
+        for keyword in config["keywords"]:
+            count = text.count(keyword)
+            if count:
+                score += count
+                hits.append(keyword)
+        scores[name] = score
+        evidence[name] = hits[:6]
+
+    familiarity = safe_int(base.get("familiarity"), 0)
+    memory_count = safe_int(base.get("memory_count"), 0)
+    joke_count = safe_int(base.get("joke_count"), 0)
+    work_runs = safe_int(base.get("work_runs"), 0)
+    ship_contributed = safe_int(base.get("ship_contributed"), 0)
+    achievement_count = safe_int(base.get("achievement_count"), 0)
+
+    if familiarity >= 75:
+        scores["Loyal Deckhand"] += 2
+    if memory_count >= 5:
+        scores["Lorekeeper"] += 1
+    if joke_count >= 3:
+        scores["Jester of the Crew"] += 2
+    if work_runs >= 2 or ship_contributed > 0:
+        scores["Loyal Deckhand"] += 2
+    if achievement_count >= 5:
+        scores["Treasure-Seeker"] += 1
+
+    best_name, best_score = max(scores.items(), key=lambda item: item[1])
+    if best_score <= 0:
+        best_name = "Quiet Newcomer"
+        best_score = 1
+
+    sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    secondary = [name for name, score in sorted_scores[1:4] if score > 0]
+    confidence = min(95, 25 + (best_score * 7) + min(20, memory_count + joke_count + achievement_count))
+    traits = list(PERSONALITY_ARCHETYPES[best_name]["traits"])
+    if secondary:
+        traits.extend(PERSONALITY_ARCHETYPES[secondary[0]]["traits"][:2])
+
+    # Preserve order while deduplicating.
+    deduped_traits = []
+    for trait in traits:
+        if trait not in deduped_traits:
+            deduped_traits.append(trait)
+
+    return {
+        "label": best_name,
+        "confidence": confidence,
+        "traits": deduped_traits[:6],
+        "secondary": secondary,
+        "evidence": evidence.get(best_name, []),
+        "signal_count": len([line for line in str(signal_text or "").splitlines() if line.strip()]),
+    }
+
+
+def attach_personality_types(conn, guild_id, members):
+    for member in members:
+        user_id = safe_int(member.get("user_id"))
+        signal_text = collect_member_signal_text(conn, guild_id, user_id, member)
+        member["personality_type"] = infer_personality_type(signal_text, member)
+    return members
+
+
 def safe_int(value, default=0):
     try:
         return int(value)
@@ -288,9 +420,14 @@ def overview_payload():
 def guild_payload(guild_id):
     with db_connect() as conn:
         payload = guild_summary(conn, guild_id)
+        members = attach_personality_types(
+            conn,
+            guild_id,
+            member_rows(conn, guild_id),
+        )
         payload.update(
             {
-                "members": member_rows(conn, guild_id),
+                "members": members,
                 "top_doubloons": rows(
                     conn,
                     """
@@ -400,9 +537,31 @@ def member_payload(guild_id, user_id):
         relationship = one(conn, "SELECT * FROM relationships WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "relationships") else None
         economy = one(conn, "SELECT * FROM economy WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "economy") else None
         contribution = one(conn, "SELECT * FROM ship_contributions WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "ship_contributions") else None
+        base = {}
+        if relationship:
+            base.update(relationship)
+        if profile:
+            base.update(profile)
+        if economy:
+            base.update(economy)
+        if contribution:
+            base["ship_contributed"] = contribution.get("amount", 0)
+
+        base.update({
+            "memory_count": scalar(conn, "SELECT COUNT(*) FROM user_memories WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "user_memories") else 0,
+            "joke_count": scalar(conn, "SELECT COUNT(*) FROM running_jokes WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "running_jokes") else 0,
+            "achievement_count": scalar(conn, "SELECT COUNT(*) FROM achievements WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "achievements") else 0,
+            "work_runs": scalar(conn, "SELECT COALESCE(SUM(total_runs), 0) FROM crew_work_stats WHERE guild_id=? AND user_id=?", (guild_id, user_id)) if table_exists(conn, "crew_work_stats") else 0,
+        })
+        personality_type = infer_personality_type(
+            collect_member_signal_text(conn, guild_id, user_id, base),
+            base,
+        )
+
         return {
             "guild_id": guild_id,
             "user_id": user_id,
+            "personality_type": personality_type,
             "profile": profile,
             "relationship": relationship,
             "economy": economy,
@@ -459,6 +618,9 @@ INDEX_HTML = r"""
     .profile-card:hover { border-color:var(--gold); background:rgba(246,196,83,.07); }
     .profile-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
     .profile-card p { margin:0; color:#d9e6fb; line-height:1.45; }
+    .personality-type { padding:10px; border:1px solid rgba(246,196,83,.22); background:rgba(246,196,83,.08); border-radius:13px; display:grid; gap:6px; }
+    .personality-type strong { color:var(--gold); font-size:15px; }
+    .personality-type > span { color:var(--muted); font-size:12px; }
     .item { padding:10px 12px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07); border-radius:12px; }
     .item small { color:var(--muted); display:block; margin-top:4px; }
     dialog { width:min(980px, calc(100vw - 28px)); border:1px solid var(--line); border-radius:18px; background:#0e192b; color:var(--text); padding:0; }
@@ -578,6 +740,13 @@ function profileBlurb(m) {
   return parts.join(' ');
 }
 
+function personalityBadge(type) {
+  if (!type) return '';
+  const traits = (type.traits || []).slice(0, 4).map(t => `<span class="pill">${esc(t)}</span>`).join('');
+  const secondary = (type.secondary || []).slice(0, 2).join(', ');
+  return `<div class="personality-type"><strong>${esc(type.label || 'Unclassified')}</strong><span>${num(type.confidence || 0)}% confidence${secondary ? ` • blends with ${esc(secondary)}` : ''}</span><div>${traits}</div></div>`;
+}
+
 function personalityCards(members) {
   if (!members.length) return '<p class="muted">No personality data found for this server. Choose a server with crew/profile counts from the Server dropdown above.</p>';
   return `<div class="profile-grid">${members.map(m => `
@@ -586,6 +755,7 @@ function personalityCards(members) {
         <div><h3>${esc(m.username || m.user_id)}</h3><span class="muted">${esc(m.relationship_type || 'Crewmate')}</span></div>
         <strong class="gold">${num(m.familiarity)}/100</strong>
       </div>
+      ${personalityBadge(m.personality_type)}
       <p>${esc(profileBlurb(m))}</p>
       <div>
         ${m.gender ? `<span class="pill">Gender: ${esc(m.gender)}</span>` : ''}
@@ -605,7 +775,7 @@ function memberTable(members) {
     <tr class="clickable" onclick="openMember('${m.guild_id}','${m.user_id}')">
       <td><b>${esc(m.username || m.user_id)}</b><br><span class="muted">${esc(m.user_id)}</span></td>
       <td>${esc(m.relationship_type || '')}<br><span class="pill">Familiarity ${num(m.familiarity)}</span>${m.nickname ? `<span class="pill">${esc(m.nickname)}</span>` : ''}</td>
-      <td>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
+      <td><b>${esc((m.personality_type && m.personality_type.label) || 'Unclassified')}</b><br>${esc(m.summary || m.opinion || 'No profile summary yet.')}</td>
       <td>${num(m.doubloons)}</td>
       <td><span class="pill">${num(m.memory_count)} memories</span><span class="pill">${num(m.joke_count)} jokes</span><span class="pill">${num(m.achievement_count)} achievements</span><span class="pill">${num(m.work_runs)} jobs</span></td>
     </tr>`).join('')}</tbody></table>`;
@@ -628,6 +798,7 @@ async function openMember(guildId, userId) {
   $('memberTitle').textContent = `${rel.username || profile.username || userId}`;
   $('memberBody').innerHTML = `
     <div class="grid">
+      <div class="card span-12"><h3>Generalized Personality Type</h3>${personalityBadge(data.personality_type)}<pre>${esc(JSON.stringify(data.personality_type || {}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Core Personality Profile</h3><pre>${esc(JSON.stringify({profile, relationship: rel, economy: econ, ship_contribution: data.ship_contribution}, null, 2))}</pre></div>
       <div class="card span-6"><h3>Achievements</h3><div class="list">${data.achievements.map(a => item(a.achievement, `${a.description || ''} • ${a.awarded_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
       <div class="card span-6"><h3>Personality Memories</h3><div class="list">${data.memories.map(m => item(m.memory, `confidence ${m.confidence || 0} • ${m.created_at || ''}`)).join('') || '<p class="muted">None yet.</p>'}</div></div>
