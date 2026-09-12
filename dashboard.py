@@ -64,6 +64,31 @@ def safe_int(value, default=0):
         return default
 
 
+ID_FIELDS = {
+    "guild_id",
+    "user_id",
+    "channel_id",
+    "welcome_channel_id",
+    "chronicle_channel_id",
+    "captured_by",
+    "discovered_by",
+}
+
+
+def json_safe_ids(value):
+    if isinstance(value, list):
+        return [json_safe_ids(item) for item in value]
+    if isinstance(value, dict):
+        safe = {}
+        for key, item in value.items():
+            if key in ID_FIELDS and item is not None:
+                safe[key] = str(item)
+            else:
+                safe[key] = json_safe_ids(item)
+        return safe
+    return value
+
+
 def guild_ids(conn):
     ids = set()
     for table in (
@@ -645,7 +670,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return token == DASHBOARD_TOKEN
 
     def send_json(self, payload, status=200):
-        body = json.dumps(payload, indent=2, default=str).encode("utf-8")
+        body = json.dumps(json_safe_ids(payload), indent=2, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
