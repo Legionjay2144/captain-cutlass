@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -567,7 +568,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
     server_version = "CutlassDashboard/1.0"
 
     def log_message(self, fmt, *args):
-        print("dashboard", self.address_string(), fmt % args)
+        message = fmt % args
+        if "token=" in message:
+            message = re.sub(r"token=[^&\s]+", "token=REDACTED", message)
+        print("dashboard", self.address_string(), message)
 
     def authorized(self):
         if not DASHBOARD_TOKEN:

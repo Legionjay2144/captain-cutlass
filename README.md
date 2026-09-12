@@ -400,16 +400,16 @@ Start the dashboard:
 docker compose --profile dashboard up -d --build dashboard
 ```
 
-Open it on the host:
+Open it from the host or LAN using the server address:
 
 ```text
-http://127.0.0.1:8787
+http://SERVER_IP:8787
 ```
 
-The compose file binds the dashboard to localhost only:
+The compose file publishes the dashboard port as:
 
 ```yaml
-127.0.0.1:8787:8787
+8787:8787
 ```
 
 If you want a simple bearer/query token, add this to `.env`:
@@ -421,14 +421,14 @@ DASHBOARD_TOKEN=choose-a-long-random-value
 Then open:
 
 ```text
-http://127.0.0.1:8787/?token=choose-a-long-random-value
+http://SERVER_IP:8787/?token=choose-a-long-random-value
 ```
 
 Health/API checks:
 
 ```bash
-curl http://127.0.0.1:8787/api/health
-curl http://127.0.0.1:8787/api/overview
+curl http://127.0.0.1:8787/api/health?token=choose-a-long-random-value
+curl http://127.0.0.1:8787/api/overview?token=choose-a-long-random-value
 ```
 
 Stop the dashboard without stopping the bot:

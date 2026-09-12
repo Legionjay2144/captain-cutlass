@@ -54,7 +54,7 @@ services:
       DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:-}
 
     ports:
-      - "127.0.0.1:8787:8787"
+      - "8787:8787"
 
     volumes:
       - ./data:/app/data:ro
